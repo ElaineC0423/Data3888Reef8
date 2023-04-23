@@ -1,0 +1,278 @@
+---
+title: "data3888week7"
+author: '500033689'
+date: "2023-04-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+library(dplyr)
+reef <- read.csv("Coral_Data_for_MINISTRY_OF_MARINE_AFFAIRS_AND_FISHERIES_REPUBLIC_OF_INDONESIA_-_Global_Coral_Reef_Monitoring_Network__GCRMN_.csv")
+fish <- read.csv("Fish_Data_for_MINISTRY_OF_MARINE_AFFAIRS_AND_FISHERIES_REPUBLIC_OF_INDONESIA_-_Global_Coral_Reef_Monitoring_Network__GCRMN_.csv")
+reef
+fish
+```
+
+
+```{r}
+dim(reef)
+dim(fish)
+```
+
+```{r}
+
+
+# 对 fish 数据集应用此函数，每三行计算一次平均值
+# 使用 dplyr 包
+library(dplyr)
+
+# 对 Latitude、Longitude 和 Depth 进行分组，计算每组的平均值
+fish_grouped <- fish %>%
+  group_by(Location,Site,Latitude, Longitude, Depth) %>%
+  summarize(across(c(Fish_area_m2, Chaetodontidae_no, Haemulidae_no, Lutjanidae_no, Serranidae_no, Labridae_no, Scaridae_no, Muraenidae_no),  ~ceiling(mean(.x, na.rm = TRUE))))
+
+# 查看结果
+print(fish_grouped)
+
+
+dim(fish_grouped)
+
+
+
+```
+```{r}
+
+library(dplyr)
+
+# 对 Latitude、Longitude 和 Depth 进行分组，计算每组的平均值
+reef_grouped <- reef %>%
+  group_by(Location,Site,Latitude, Longitude, Depth) %>%
+  summarize(across(c(Fish_area_m2, Hardcoral_percent, Softcoral_percent, Reckilledcoral_percent, Macroalgae_percent, Corallinealgae_percent, Other_percent),  ~ceiling(mean(.x, na.rm = TRUE))))
+
+# 查看结果
+print(reef_grouped)
+
+
+dim(reef_grouped)
+```
+```{r}
+combined_data <- reef_grouped %>%
+  inner_join(fish_grouped, by = c("Site", "Depth"))
+
+# 查看结果
+print(combined_data)
+
+write.csv(combined_data, "combined_data.csv", row.names = FALSE)
+
+
+```
+```{r}
+selected_columns <- combined_data %>%
+  select(Location.x,Site, Depth, Chaetodontidae_no, Haemulidae_no, Lutjanidae_no, Serranidae_no, Labridae_no, Scaridae_no, Muraenidae_no, Hardcoral_percent, Reckilledcoral_percent, Softcoral_percent)
+
+print(selected_columns)
+
+```
+```{r}
+# 计算所有鱼类的总数量
+selected_columns <- selected_columns %>%
+  mutate(Total_fish_count = Chaetodontidae_no + Haemulidae_no + Lutjanidae_no + Serranidae_no + Labridae_no + Scaridae_no + Muraenidae_no)
+
+library(ggplot2)
+
+# 创建散点图
+ggplot(selected_columns, aes(x = Reckilledcoral_percent, y = Total_fish_count)) +
+  geom_point() +
+  labs(title = "Reckilledcoral_percent",
+       x = "Reckilledcoral_percent",
+       y = "Fish")
+
+```
+```{r}
+library(ggplot2)
+
+# 计算总鱼数量
+reef_fish <- selected_columns %>%
+  mutate(Total_fish_count = Chaetodontidae_no + Haemulidae_no + Lutjanidae_no + Serranidae_no + Labridae_no + Scaridae_no + Muraenidae_no)
+
+# 取对数
+reef_fish$log_total_fish <- log(reef_fish$Total_fish_count)
+
+# 拟合对数线性模型
+model <- lm(log_total_fish ~ Reckilledcoral_percent, data = reef_fish)
+
+# 绘制散点图和回归线
+plot(reef_fish$Reckilledcoral_percent, reef_fish$log_total_fish, main = "Scatterplot of log(total_fish) vs Reckilledcoral_percent", xlab = "Reckilledcoral_percent", ylab = "log(total_fish)")
+abline(model, col = "red")
+
+
+
+
+
+```
+
+
+
+
+```{r}
+# 使用ggplot2创建散点图，为每种鱼类创建子图
+library(ggplot2)
+
+fish_species <- c("Chaetodontidae_no", "Haemulidae_no", "Lutjanidae_no", "Serranidae_no", "Labridae_no", "Scaridae_no", "Muraenidae_no")
+
+# 为每种鱼类创建散点图
+for (species in fish_species) {
+  plot_title <- paste("Reckilledcoral_percent与", species)
+  p <- ggplot(selected_columns, aes_string(x = "Reckilledcoral_percent", y = species)) +
+    geom_point() +
+    labs(title = plot_title,
+         x = "Reckilledcoral_percent",
+         y = species)
+  print(p)
+}
+
+```
+```{r}
+# 计算每种鱼类与Reckilledcoral_percent的相关系数
+correlations <- sapply(fish_species, function(species) {
+  cor(selected_columns$Reckilledcoral_percent, selected_columns[[species]], use = "complete.obs")
+})
+
+# 找到与Reckilledcoral_percent关系最大的鱼类
+max_correlation_index <- which.max(abs(correlations))
+max_correlation_species <- fish_species[max_correlation_index]
+
+cat("Max relevant：", max_correlation_species, "\n")
+
+# 使用线性回归模型拟合数据
+linear_model <- lm(formula(paste(max_correlation_species, " ~ Reckilledcoral_percent")), data = selected_columns)
+
+# 输出模型摘要
+summary(linear_model)
+
+```
+```{r}
+# 加载所需库
+library(ggplot2)
+
+# 创建散点图并添加线性回归拟合线
+plot <- ggplot(selected_columns, aes_string(x = "Reckilledcoral_percent", y = max_correlation_species)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = paste("关系最大的鱼类与Reckilledcoral_percent之间的散点图和拟合线:", max_correlation_species),
+       x = "Reckilledcoral_percent",
+       y = max_correlation_species)
+
+# 显示图像
+print(plot)
+
+```
+```{r}
+# 创建散点图并添加对数拟合线
+log_plot <- ggplot(selected_columns, aes_string(x = "Reckilledcoral_percent", y = max_correlation_species)) +
+  geom_point() +
+  geom_smooth(method = "glm", method.args = list(family = "quasipoisson"), se = FALSE, color = "blue") +
+  labs(title = paste("关系最大的鱼类与Reckilledcoral_percent之间的散点图和对数拟合线:", max_correlation_species),
+       x = "Reckilledcoral_percent",
+       y = max_correlation_species)
+
+# 显示图像
+print(log_plot)
+
+```
+
+```{r}
+library(dplyr)
+
+reef <- read.csv("Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv")
+
+# 筛选印度尼西亚地区 2017 和 2018 年的数据
+reef_indonesia_17_18 <- reef %>%
+  filter(Country == "Indonesia" & Year %in% c(2017, 2018))
+
+# 查看筛选结果
+print(reef_indonesia_17_18)
+
+```
+```{r}
+selected_columns
+```
+```{r}
+library(dplyr)
+
+reef_indonesia_17_18 <- reef_indonesia_17_18 %>%
+  mutate(State.Province.Island = case_when(
+    State.Province.Island %in% c("Maluku", "North Sulawesi", "Maluku tengah") ~ "maluku",
+    TRUE ~ State.Province.Island
+  ))
+
+library(dplyr)
+
+reef_indonesia_17_18 <- reef_indonesia_17_18 %>%
+  mutate(State.Province.Island = case_when(
+    State.Province.Island %in% c("Maluku", "North Sulawesi", "Maluku tengah") ~ "maluku",
+    TRUE ~ State.Province.Island
+  ))
+```
+```{r}
+library(dplyr)
+
+selected_columns <- selected_columns %>%
+  mutate(Location.x = "maluku")
+
+# Check the updated values
+print(selected_columns)
+
+```
+```{r}
+library(dplyr)
+
+combined_data <- inner_join(reef_indonesia_17_18, selected_columns, by = c("State.Province.Island" = "Locations.x"))
+
+# Check the joined dataset
+print(combined_data)
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+
+
+# Create a scatter plot of ssta_dhw vs. Fish_Count
+ggplot(combined_data, aes(x = SSTA_DHW, y = Chaetodontidae_no)) +
+  geom_point() +
+  labs(title = "Relationship between ssta_dhw and Fish_Count",
+       x = "ssta_dhw",
+       y = "Fish_Count") +
+  theme_minimal()
+
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Define the number of bins
+n_bins <- 10
+
+# Bin the ssta_dhw values and calculate the average Fish_Count for each bin
+binned_data <- combined_data %>%
+  mutate(ssta_dhw_bin = cut(SSTA_DHW, breaks = n_bins, labels = FALSE)) %>%
+  group_by(ssta_dhw_bin) %>%
+  summarise(avg_Fish_Count = mean(Chaetodontidae_no, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a bar chart of the binned ssta_dhw values vs. average Fish_Count
+ggplot(binned_data, aes(x = factor(ssta_dhw_bin), y = avg_Fish_Count)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average Fish_Count per ssta_dhw Bin",
+       x = "ssta_dhw Bin",
+       y = "Average Fish_Count") +
+  theme_minimal()
+
+```
+

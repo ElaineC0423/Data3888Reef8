@@ -1,0 +1,304 @@
+---
+title: "Untitled"
+author: '500033689'
+date: "2023-04-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+
+fish2015 <- read_csv("DataFromGeodie/2015 fishbiomass.csv")
+reef2015 <- read_csv("DataFromGeodie/2015benthicdata.csv")
+
+reef2016 <- read_csv("DataFromGeodie/karimunjawa2016benthicdata.csv")
+fish2016 <- read_csv("DataFromGeodie/karimunjawa2016fishbiomass.csv")
+
+reef2018 <- read_csv("DataFromGeodie/liang_ngali_mpa_2018fishbiomass.csv")
+
+reef2019 <- read_csv("DataFromGeodie/karimunjawa2019benthicdata.csv")
+fish2019 <- read_csv("DataFromGeodie/karimunjawa2019fishbiomass.csv")
+
+reef2021 <- read_csv("DataFromGeodie/SE Sulawesi2021benthicdata.csv")
+
+
+selecColoumn <- c("site_name","latitude","longitude", "sample_date_year", "sample_date_month", "sample_date_day", "reef_exposure", "reef_type", "reef_zone", "depth_avg", "percent_cover_by_benthic_category_avg")
+reef2015<- reef2015 %>% select(selecColoumn)
+selecColoumn<- c("site_name","latitude","longitude","sample_date_year", "sample_date_month", "sample_date_day", "biomass_kgha_by_fish_family_avg")
+fish2015<- fish2015 %>% select(selecColoumn)
+
+
+selecColoumn <- c("site_name", "latitude","longitude","sample_date_year", "sample_date_month", "sample_date_day", "reef_exposure", "reef_type", "reef_zone", "depth_avg", "percent_cover_by_benthic_category_avg")
+reef2016<- reef2016 %>% select(selecColoumn)
+selecColoumn<- c("site_name","latitude","longitude","sample_date_year", "sample_date_month", "sample_date_day", "biomass_kgha_by_fish_family_avg")
+fish2016<- fish2016 %>% select(selecColoumn)
+
+selecColoumn<- c("site_name","latitude","longitude","sample_date_year", "sample_date_month", "sample_date_day", "biomass_kgha_by_fish_family_avg")
+reef2018<- reef2018 %>% select(selecColoumn)
+
+selecColoumn <- c("site_name","latitude","longitude", "sample_date_year", "sample_date_month", "sample_date_day", "reef_exposure", "reef_type", "reef_zone", "depth_avg", "percent_cover_by_benthic_category_avg")
+reef2019<- reef2019 %>% select(selecColoumn)
+selecColoumn<- c("site_name","latitude","longitude","sample_date_year", "sample_date_month", "sample_date_day", "biomass_kgha_by_fish_family_avg")
+fish2019<- fish2019 %>% select(selecColoumn)
+
+
+selecColoumn <- c("site_name", "latitude","longitude","sample_date_year", "sample_date_month", "sample_date_day", "reef_exposure", "reef_type", "reef_zone", "depth_avg", "percent_cover_by_benthic_category_avg")
+reef2021 <- reef2021 %>% select(selecColoumn)
+
+
+reef2015
+reef2016
+reef2019
+reef2021
+```
+```{r}
+library(readr)
+library(dplyr)
+
+# 合并所有reef数据集
+all_reef_data <- rbind(reef2015, reef2016, reef2019, reef2021)
+
+# 合并所有fish数据集
+all_fish_data <- rbind(fish2015, fish2016, fish2019)
+
+# 将合并后的数据集保存为CSV文件
+write_csv(all_reef_data, "all_reef_data.csv")
+write_csv(all_fish_data, "all_fish_data.csv")
+
+```
+
+
+```{r}
+
+library(leaflet)
+
+# 从CSV文件中读取数据
+data <- read.csv("all_fish_data.csv")
+
+# 创建地图
+map <- leaflet(data) %>%
+  addTiles() %>%
+  setView(lng = mean(data$longitude), lat = mean(data$latitude), zoom = 10) %>%
+  addCircleMarkers(
+    lng = ~longitude, lat = ~latitude,
+    radius = 5,
+    color = "red",
+    stroke = FALSE, fillOpacity = 0.8,
+    popup = ~paste0("<strong>Site Name: </strong>", site_name,
+                    "<br><strong>Year: </strong>", sample_date_year,
+                    "<br><strong>Month: </strong>", sample_date_month,
+                    "<br><strong>Day: </strong>", sample_date_day,
+                    "<br><strong>Biomass: </strong>", biomass_kgha_by_fish_family_avg)
+  )
+
+map
+
+
+
+
+
+
+```
+
+
+```{r}
+library(shiny)
+library(leaflet)
+library(plotly)
+convert_biomass_to_list <- function(biomass_string) {
+  biomass_string <- gsub("[{}]", "", biomass_string)
+  biomass_pairs <- strsplit(biomass_string, ",")[[1]]
+  
+  biomass_list <- list()
+  
+  for (pair in biomass_pairs) {
+    key_value <- strsplit(pair, ":")[[1]]
+    key <- trimws(key_value[1])
+    value <- as.numeric(trimws(key_value[2]))
+    biomass_list[[key]] <- value
+  }
+  
+  return(biomass_list)
+}
+
+popupGraphs <- function(data) {
+  popup_content <- vector("list", length = nrow(data))
+  
+  for (i in 1:nrow(data)) {
+    biomass <- data$biomass_kgha_by_fish_family_avg[[i]]
+    
+    plot <- plot_ly(x = names(biomass), y = unname(biomass), type = "bar", marker = list(color = "blue")) %>%
+      layout(title = paste0("Biomass for ", data$site_name[i]),
+             xaxis = list(title = "Fish Family"),
+             yaxis = list(title = "Biomass"))
+    
+    popup_content[[i]] <- plotly::plotly_build(plot)
+  }
+  
+  return(popup_content)
+}
+
+biomass_string <- "{'Labridae': 27.39, 'Mullidae': 14.06, 'Scaridae': 27.1, 'Siganidae': 3.74, 'Apogonidae': 0.58, 'Balistidae': 4.7, 'Blenniidae': 0.05, 'Lutjanidae': 1.68, 'Serranidae': 9.89, 'Cirrhitidae': 0.35, 'Lethrinidae': 7.64, 'Acanthuridae': 43.76, 'Caesioinidae': 30.63, 'Nemipteridae': 4.03, 'Monacanthidae': 0.45, 'Pomacanthidae': 1.36, 'Pomacentridae': 50.86, 'Chaetodontidae': 6.83, 'Tetraodontidae': 0.54}"
+biomass_list <- convert_biomass_to_list(biomass_string)
+print(biomass_list)
+
+test_data <- read.csv("all_fish_data.csv")
+
+test_data <- test_data %>%
+  mutate(biomass_kgha_by_fish_family_avg = sapply(biomass_kgha_by_fish_family_avg, convert_biomass_to_list))
+
+popup_content <- popupGraphs(test_data)
+print(plotly::plotly_build(popup_content[[1]]))
+
+plotly::plotly_build(popup_content[[1]])
+```
+```{r}
+library(tidyverse)
+library(jsonlite)
+
+# 读取数据
+df <- read_csv("all_fish_data.csv")
+
+# 定义一个函数，将json字符串转换成列表
+to_list <- function(x) {
+  fromJSON(gsub("'", '"', x), simplifyVector = FALSE)
+}
+
+# 拆分biomass_kgha_by_fish_family_avg列，每个种类一列
+df_split <- df %>% 
+  mutate(biomass_kgha_by_fish_family_avg = lapply(biomass_kgha_by_fish_family_avg, to_list)) %>% 
+  unnest_wider(biomass_kgha_by_fish_family_avg, names_sep = "_")
+
+# 输出结果
+write.csv(df_split, "all_fish_data.csv", row.names = FALSE)
+
+
+
+```
+```{r}
+
+# 读取数据
+data <- read_csv("all_fish_data.csv")
+
+library(ggplot2)
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Labridae)) +
+geom_line(color = "blue") +
+ggtitle("Biomass kgha by Labridae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Labridae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Mullidae)) +
+geom_line(color = "red") +
+ggtitle("Biomass kgha by Mullidae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Mullidae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Scaridae)) +
+geom_line(color = "green") +
+ggtitle("Biomass kgha by Scaridae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Scaridae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Siganidae)) +
+geom_line(color = "purple") +
+ggtitle("Biomass kgha by Siganidae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Siganidae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Apogonidae)) +
+geom_line(color = "orange") +
+ggtitle("Biomass kgha by Apogonidae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Apogonidae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Balistidae)) +
+geom_line(color = "brown") +
+ggtitle("Biomass kgha by Balistidae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Balistidae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Blenniidae)) +
+geom_line(color = "gray") +
+ggtitle("Biomass kgha by Blenniidae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Blenniidae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Lutjanidae)) +
+geom_line(color = "pink") +
+ggtitle("Biomass kgha by Lutjanidae over years") +
+xlab("Year") +
+ylab("Biomass kgha by Lutjanidae")
+
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Cirrhitidae)) + 
+  geom_line(color = "green") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Lethrinidae)) + 
+  geom_line(color = "orange") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Acanthuridae)) + 
+  geom_line(color = "purple") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Caesioinidae)) + 
+  geom_line(color = "red") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Nemipteridae)) + 
+  geom_line(color = "brown") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Monacanthidae)) + 
+  geom_line(color = "grey") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+  
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Pomacanthidae)) + 
+  geom_line(color = "navy") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+  
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Pomacentridae)) + 
+  geom_line(color = "magenta") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+  ylab("Biomass kgha by fish family avg")
+
+ggplot(data, aes(x = sample_date_year, y = biomass_kgha_by_fish_family_avg_Chaetodontidae)) + 
+  geom_line(color = "coral") + 
+  ggtitle("Biomass kgha by fish family avg over years") + 
+  xlab("Year") + 
+   ylab("Biomass kgha by fish family avg")
+
+
+
+
+```
+

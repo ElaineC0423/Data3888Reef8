@@ -1,0 +1,329 @@
+---
+title: "Week8"
+author: '500033689'
+date: "2023-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+AquaCulture_Production_Capture <- read.csv("archive/capture-fisheries-vs-aquaculture.csv")
+Indonesia_APC <- filter(AquaCulture_Production_Capture, Entity == "Indonesia")
+
+fish_and_seafood_consumption_per_capita <- read.csv("archive/fish-and-seafood-consumption-per-capita.csv")
+Indonesia_Seafoodpp <- filter(fish_and_seafood_consumption_per_capita, Entity == "Indonesia")
+
+fish_stocks_within_sustainable_levels <- read.csv("archive/fish-stocks-within-sustainable-levels.csv")
+Indonesia_sustainable_level<- filter(fish_stocks_within_sustainable_levels, Entity == "Southwest Pacific")
+
+seafood_and_fish_production_thousand_tonnes <- read.csv("archive/seafood-and-fish-production-thousand-tonnes.csv")
+Indonesia_production_thousand_tonnes<- filter(seafood_and_fish_production_thousand_tonnes, Entity == "Indonesia")
+```
+
+```{r}
+Indonesia_APC
+Indonesia_Seafoodpp
+Indonesia_sustainable_level
+Indonesia_production_thousand_tonnes
+```
+```{r}
+library(ggplot2)
+
+ggplot(Indonesia_APC, aes(x = Year, y = Aquaculture.production..metric.tons.)) +
+  geom_line() +
+  labs(title = "Aquaculture Production in Indonesia",
+       x = "Year",
+       y = "Aquaculture Production (metric tons)")
+
+ggplot(Indonesia_Seafoodpp, aes(x = Year, y = Fish..Seafood..Food.supply.quantity..kg.capita.yr...FAO..2020.)) +
+  geom_line() +
+  labs(title = "Aquaculture Production in Indonesia",
+       x = "Year",
+       y = "Indonesia_Seafoodpp")
+
+ggplot(Indonesia_production_thousand_tonnes, aes(x = Year, y = Commodity.Balances...Livestock.and.Fish.Primary.Equivalent...Pelagic.Fish...2763...Production...5510...tonnes)) +
+  geom_line() +
+  labs(title = "Aquaculture Production in Indonesia",
+       x = "Year",
+       y = "Indonesia_production_thousand_tonnes")
+
+```
+
+
+```{r}
+library(dplyr)
+Indonesia_Reef <- read.csv("Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv")
+Indonesia_Reef <- filter(Indonesia_Reef, Country == "Indonesia")
+
+```
+
+```{r}
+
+Indonesia_Reef <- na.omit(Indonesia_Reef)
+Indonesia_Reef <- dplyr::filter(Indonesia_Reef, Country == "Indonesia") %>%
+  dplyr::select(Year, Average_bleaching, SSTA_DHW) %>%
+  dplyr::group_by(Year) %>%
+  dplyr::summarize(mean_bleaching = mean(Average_bleaching),
+            mean_SSTA_DHW = mean(SSTA_DHW))
+
+Indonesia_Reef
+```
+
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# 合并数据集
+Indonesia_APC_merged <- left_join(Indonesia_APC, Indonesia_Reef, by = "Year")
+Indonesia_Seafoodpp_merged <- left_join(Indonesia_Seafoodpp, Indonesia_Reef, by = "Year")
+Indonesia_production_thousand_tonnes_merged <- left_join(Indonesia_production_thousand_tonnes, Indonesia_Reef, by = "Year")
+
+Indonesia_APC_merged 
+Indonesia_Seafoodpp_merged
+Indonesia_production_thousand_tonnes_merged
+
+```
+
+
+```{r}
+library(ggplot2)
+
+library(ggplot2)
+
+ggplot(Indonesia_Reef, aes(x = Year, y = mean_bleaching)) +
+  geom_line(color = "blue") +
+  geom_line(aes(y = mean_SSTA_DHW), color = "red") + 
+  labs(title = "Average Bleaching and SSTA in Indonesia",
+       x = "Year",
+       y = "Value",
+       color = "Variable") +
+  scale_color_manual(values = c("blue", "red"), 
+                     labels = c("Average Bleaching", "SSTA_DHW"))
+
+
+```
+```{r}
+normalize <- function(x) {
+  x_min <- min(x, na.rm = TRUE)
+  x_max <- max(x, na.rm = TRUE)
+  if (is.infinite(x_min) || is.infinite(x_max)) {
+    warning("Data contains only NAs or Inf values.")
+    return(x)
+  }
+  return ((x - x_min) / (x_max - x_min))
+}
+
+
+Indonesia_APC_filtered <- filter(Indonesia_APC_merged, Year >= 2002 & Year <= 2017)
+Indonesia_Seafoodpp_filtered <- filter(Indonesia_Seafoodpp_merged, Year >= 2002 & Year <= 2017)
+Indonesia_production_thousand_tonnes_filtered <- filter(Indonesia_production_thousand_tonnes_merged, Year >= 2002 & Year <= 2017)
+Indonesia_Reef_filtered<- filter(Indonesia_Reef, Year >= 2002 & Year <= 2017)
+
+
+
+# Normalize the columns
+Indonesia_APC_filtered$normalized_Aquaculture_production <- normalize(Indonesia_APC_filtered$Aquaculture.production..metric.tons.)
+Indonesia_Seafoodpp_filtered$normalized_Seafoodpp <- normalize(Indonesia_Seafoodpp_filtered$Fish..Seafood..Food.supply.quantity..kg.capita.yr...FAO..2020.)
+Indonesia_production_thousand_tonnes_filtered$normalized_Production <- normalize(Indonesia_production_thousand_tonnes_filtered$Commodity.Balances...Livestock.and.Fish.Primary.Equivalent...Pelagic.Fish...2763...Production...5510...tonnes)
+Indonesia_Reef$mean_SSTA_DHW<- normalize(Indonesia_Reef$mean_SSTA_DHW)
+Indonesia_Reef_filtered$normalized_mean_SSTA_DHW <- normalize(Indonesia_Reef_filtered$mean_SSTA_DHW)
+Indonesia_Reef_filtered
+
+# Aquaculture production and SSTA_DHW plot
+plot_Aquaculture_production_SSTA_DHW <- ggplot() +
+  geom_line(data = Indonesia_APC_filtered, aes(x = Year, y = normalized_Aquaculture_production, color = "Aquaculture Production"), size = 1) +
+  geom_line(data = Indonesia_Reef_filtered, aes(x = Year, y = normalized_mean_SSTA_DHW, color = "SSTA_DHW"), size = 1) +
+  scale_color_manual(values = c("Aquaculture Production" = "blue", "SSTA_DHW" = "purple")) +
+  labs(title = "Normalized Aquaculture Production and SSTA_DHW (2002 - 2013)",
+       x = "Year",
+       y = "Value",
+       color = "Variable") +
+  theme_minimal()
+
+# Seafood per capita and SSTA_DHW plot
+plot_Seafoodpp_SSTA_DHW <- ggplot() +
+  geom_line(data = Indonesia_Seafoodpp_filtered, aes(x = Year, y = normalized_Seafoodpp, color = "Seafood per Capita"), size = 1) +
+  geom_line(data = Indonesia_Reef, aes(x = Year, y = mean_SSTA_DHW, color = "SSTA_DHW"), size = 1) +
+  scale_color_manual(values = c("Seafood per Capita" = "red", "SSTA_DHW" = "purple")) +
+  labs(title = "Normalized Seafood per Capita and SSTA_DHW (2002 - 2013)",
+       x = "Year",
+       y = "Value",
+       color = "Variable") +
+  theme_minimal()
+
+# Production and SSTA_DHW plot
+plot_Production_SSTA_DHW <- ggplot() +
+  geom_line(data = Indonesia_production_thousand_tonnes_filtered, aes(x = Year, y = normalized_Production, color = "Production"), size = 1) +
+  geom_line(data = Indonesia_Reef, aes(x = Year, y = mean_SSTA_DHW, color = "SSTA_DHW"), size = 1) +
+  scale_color_manual(values = c("Production" = "green", "SSTA_DHW" = "purple")) +
+  labs(title = "Normalized Production and SSTA_DHW (2002 - 2013)",
+       x = "Year",
+       y = "Value",
+       color = "Variable") +
+  theme_minimal()
+
+# Display the plots
+print(plot_Aquaculture_production_SSTA_DHW)
+print(plot_Seafoodpp_SSTA_DHW)
+print(plot_Production_SSTA_DHW)
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+library(caret)
+library(e1071)
+
+# 准备数据
+data <- Indonesia_Reef
+data
+
+ # Set up the training control parameters
+train_control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              repeats = 3,
+                              search = "grid")
+# Train the SVM model
+svm_model <- train(mean_bleaching ~ mean_SSTA_DHW,
+                   data = data,
+                   method = "svmRadial",
+                   trControl = train_control,
+                   preProcess = c("center", "scale"),
+                   tuneLength = 10)
+
+# Generate a sequence of SSTA_DHW values for the next 5 years
+future_SSTA_DHW <- seq(from = max(data$mean_SSTA_DHW) + 0.1, 
+                       by = 0.1, 
+                       length.out = 5)
+
+# Predict future bleaching based on the future SSTA_DHW values
+future_bleaching <- predict(svm_model, newdata = data.frame(mean_SSTA_DHW = future_SSTA_DHW))
+
+# Combine the future SSTA_DHW values and the predicted bleaching values
+future_bleaching_data <- data.frame(mean_SSTA_DHW = future_SSTA_DHW, mean_bleaching = future_bleaching)
+
+# Print the future bleaching data
+print(future_bleaching_data)
+
+# Generate a sequence of years for the next 5 years
+future_years <- seq(from = max(data$Year) + 1, 
+                    by = 1, 
+                    length.out = 5)
+
+# Add the future years to the future_bleaching_data data frame
+future_bleaching_data$Year <- future_years
+
+# Combine the original and predicted data
+visualization_data <- rbind(data, future_bleaching_data)
+
+# Plot the original and predicted bleaching data
+plot_bleaching <- ggplot(visualization_data, aes(x = Year, y = mean_bleaching)) +
+  geom_point(data = data, aes(color = "Original Data")) +
+  geom_line(data = future_bleaching_data, aes(color = "Predicted Data")) +
+  labs(title = "Original and Predicted Coral Bleaching Based on SSTA_DHW",
+       x = "Year",
+       y = "Mean Bleaching",
+       color = "Data") +
+  theme_minimal()
+
+# Display the plot
+print(plot_bleaching)
+
+
+
+```
+```{r}
+library(vars)
+
+# Remove any rows with missing values
+training_data <- na.omit(data)
+
+# Create a time series object using the mean_bleaching and mean_SSTA_DHW data and the start year
+training_ts <- ts(training_data[, c("mean_bleaching", "mean_SSTA_DHW")], start = min(training_data$Year))
+
+# Determine the optimal lag order for the VAR model using the AIC criterion
+lag_order <- VARselect(training_ts, lag.max = 5, type = "const")$selection["AIC(n)"]
+
+# Fit the VAR model
+var_model <- VAR(training_ts, p = lag_order, type = "const")
+
+# Forecast the next 5 years
+forecast_result <- predict(var_model, n.ahead = 5)
+
+# Print the forecast result
+print(forecast_result)
+
+# Create a data frame for the forecasted bleaching values
+forecast_bleaching <- data.frame(Year = seq(max(training_data$Year) + 1, length.out = 5, by = 1),
+                                 mean_bleaching = forecast_result$fcst$mean_bleaching[, 1])
+
+# Combine the original and forecasted data
+visualization_data <- rbind(training_data[, c("Year", "mean_bleaching")], forecast_bleaching)
+
+# Plot the original and forecasted bleaching data
+plot_bleaching <- ggplot(visualization_data, aes(x = Year, y = mean_bleaching)) +
+  geom_point(data = training_data[, c("Year", "mean_bleaching")], aes(color = "Original Data")) +
+  geom_line(data = forecast_bleaching, aes(color = "Forecasted Data")) +
+  labs(title = "Original and Forecasted Coral Bleaching Based on SSTA_DHW",
+       x = "Year",
+       y = "Mean Bleaching",
+       color = "Data") +
+  theme_minimal()
+
+# Display the plot
+print(plot_bleaching)
+
+
+
+```
+
+```{r}
+# Filter Indonesia_Reef data for the same years as in Indonesia_APC_filtered and Indonesia_production_thousand_tonnes_filtered
+Indonesia_Reef_filtered <- filter(Indonesia_Reef, Year >= 2002 & Year <= 2013)
+Indonesia_Reef_filtered$mean_SSTA_DHW
+Indonesia_APC_filtered <- filter(Indonesia_APC_filtered, Year >= 2002 & Year <= 2013)
+# Prepare the data for SVM
+svm_data_Aquaculture <- data.frame(SSTA_DHW = Indonesia_Reef_filtered$mean_SSTA_DHW,
+                                   normalized_Aquaculture_production = Indonesia_APC_filtered$normalized_Aquaculture_production)
+
+svm_data_Production <- data.frame(SSTA_DHW = Indonesia_Reef_filtered$mean_SSTA_DHW,
+                                  normalized_Production = Indonesia_production_thousand_tonnes_filtered$normalized_Production)
+
+# Fit the SVM model for Aquaculture production
+svm_model_Aquaculture <- svm(normalized_Aquaculture_production ~ SSTA_DHW, data = svm_data_Aquaculture, kernel = "radial")
+
+# Fit the SVM model for Production
+svm_model_Production <- svm(normalized_Production ~ SSTA_DHW, data = svm_data_Production, kernel = "radial")
+
+# Future SSTA_DHW values
+future_SSTA_DHW <- seq(max(Indonesia_Reef_filtered$mean_SSTA_DHW) + 1, length.out = 5, by = 1)
+
+# Predict future values using the SVM models
+predicted_Aquaculture_production <- predict(svm_model_Aquaculture, newdata = data.frame(SSTA_DHW = future_SSTA_DHW))
+predicted_Production <- predict(svm_model_Production, newdata = data.frame(SSTA_DHW = future_SSTA_DHW))
+
+# Combine the predictions with the corresponding years
+future_years <- seq(max(Indonesia_APC_filtered$Year) + 1, length.out = 5, by = 1)
+predictions_Aquaculture_production <- data.frame(Year = future_years, predicted_Aquaculture_production = predicted_Aquaculture_production)
+predictions_Production <- data.frame(Year = future_years, predicted_Production = predicted_Production)
+
+# Print the predictions
+predictions_Aquaculture_production
+predictions_Production
+
+```
+
