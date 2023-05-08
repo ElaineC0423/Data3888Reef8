@@ -302,7 +302,7 @@ server <- function(input, output, session) {
   
   
   fish_model_prediction <- reactive({
-    req(input$predict)
+    req(input$predict_fish)
     
     input_data <- data.frame(
       yellowfin_tuna_rate_norm = input$yellowfin_tuna_rate_norm,
