@@ -89,22 +89,36 @@ ui <- fluidPage(
                       
              ),
              
-             tabPanel("Graph",
-                      fluidRow(
-                        column(6, plotOutput("bleaching_by_temp")),
-                        column(6, plotOutput("shap_plot"))
-                      ),
-                      fluidRow(
-                        column(4, wellPanel(
-                          sliderInput("num_years", "Select number of years to predict:", min = 1, max = 10, value = 5),
-                          selectInput("selected_fish", "Select a fish:", 
-                                      choices = c("Yellowfin Tuna" = "yellowfin_tuna_rate_norm",
-                                                  "Scombroids" = "scombroids_rate_norm",
-                                                  "Skipjack Tuna" = "skipjack_tuna_rate_norm"))
-                        )),
-                        column(8, plotOutput("bleaching_by_year")),
-                        column(4, plotOutput("bleaching_by_fish"))
-                      )
+             
+             tabPanel(
+               "Graph",
+               tabsetPanel(
+                 tabPanel(
+                   "Importance of Fish Species and Environment",
+                   fluidRow(
+                     column(6, plotOutput("shap_plot2")),
+                     column(6, plotOutput("shap_plot"))
+                   )
+                 ),
+                 tabPanel(
+                   "Overall Relationship between Fish and Bleaching / Bleaching Over the Years",
+                   fluidRow(
+                     column(6, wellPanel(
+                       sliderInput("num_years", "Select number of years to predict:", min = 1, max = 10, value = 5)
+                     )),
+                     column(6, plotOutput("bleaching_by_year"))
+                   ),
+                   fluidRow(
+                     column(4, wellPanel(
+                       selectInput("selected_fish", "Select a fish:", 
+                                   choices = c("Yellowfin Tuna" = "yellowfin_tuna_rate_norm",
+                                               "Scombroids" = "scombroids_rate_norm",
+                                               "Skipjack Tuna" = "skipjack_tuna_rate_norm"))
+                     )),
+                     column(8, plotOutput("bleaching_by_fish"))
+                   )
+                 )
+               )
              )
              
   )
@@ -112,20 +126,7 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   # Split the data into a training and testing set
-  split_indices <- createDataPartition(merged_effort$average_bleaching, p = 0.8, list = FALSE)
-  training_set <- merged_effort[split_indices, ]
-  testing_set <- merged_effort[-split_indices, ]
-  training_set$bleaching_occurred <- as.factor(ifelse(training_set$average_bleaching > 0, 1, 0))
-  testing_set$bleaching_occurred <- as.factor(ifelse(testing_set$average_bleaching > 0, 1, 0))
-  rf_model <- randomForest(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
-                           data = training_set)
-  
-  subset_test_data <- testing_set[sample(nrow(testing_set), 100), c("clim_sst", "rate_norm", "distance_to_nearest_reef")]
-  
-  
-  rf_predictor <- Predictor$new(rf_model, data = testing_set[, c("clim_sst", "rate_norm", "distance_to_nearest_reef")], y = as.numeric(testing_set$bleaching_occurred), type = "prob")
-  shapley_explainer <- Shapley$new(rf_predictor, x = subset_test_data)
-  shapley_values <- shapley_explainer$results
+
   
   
   model_prediction <- reactive({
@@ -194,7 +195,7 @@ server <- function(input, output, session) {
   
   reef_data_counts <- reef_merged %>%
     group_by(reef_id) %>%
-    summarise(data_count = n()) %>%
+    dplyr::summarise(data_count = n()) %>%
     ungroup()
   
   leaflet_data <- reactive({
