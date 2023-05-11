@@ -1,0 +1,119 @@
+---
+title: "Bleaching Prediction"
+output: html_document
+date: "2023-05-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+Fish <- read.csv("three_selected_fish.csv")
+Fish$bleaching_occurred <- as.factor(ifelse(regression_fish$average_bleaching > 0, 1, 0))
+```
+
+## random Forest modle
+```{r}
+split_indices <- createDataPartition(Fish$average_bleaching, p = 0.8, list = FALSE)
+  training_set <- Fish[split_indices, ]
+  testing_set <- Fish[-split_indices, ]
+  training_set$bleaching_occurred <- as.factor(ifelse(training_set$average_bleaching > 0, 1, 0))
+  testing_set$bleaching_occurred <- as.factor(ifelse(testing_set$average_bleaching > 0, 1, 0))
+  rf_model <- randomForest(bleaching_occurred ~ yellowfin_tuna_rate_norm + scombroids_rate_norm + skipjack_tuna_rate_norm,
+                           data = training_set)
+```
+ accuracy is not great: OOB error rate of over 30%
+
+## linear regression
+```{r}
+regression_fish <- Fish
+regression_fish$bleaching_occurred <- as.factor(ifelse(regression_fish$average_bleaching > 0, 1, 0))
+Bleaching_prediction = lm(bleaching_occurred ~ yellowfin_tuna_rate_norm + scombroids_rate_norm + skipjack_tuna_rate_norm, data = regression_fish)
+```
+average_bleaching = 1.51581 + 0.04852 * yellowfin_tuna_rate_norm - 284.44523 * scombroids_rate_norm - 0.19155 * skipjack_tuna_rate_norm
+
+## svm
+```{r}
+library(e1071) # load the e1071 package for SVM
+
+# read in the data from a csv file
+data <- Fish
+
+# split the data into training and testing sets (80% for training, 20% for testing)
+trainIndex <- sample(1:nrow(data), 0.8*nrow(data))
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# create the SVM model using the radial kernel function
+svmModel <- svm(bleaching_occurred ~ skipjack_tuna_rate_norm + scombroids_rate_norm + yellowfin_tuna_rate_norm,
+                data = trainData,
+                kernel = "radial")
+
+# make predictions on the testing set using the model
+predictions <- predict(svmModel, testData)
+
+# calculate the accuracy of the model
+accuracy <- mean(predictions == testData$bleaching_occurred)
+
+# print the accuracy
+cat("Accuracy of the SVM model:", accuracy)
+
+```
+
+```{r}
+library(e1071)
+library(caret)
+
+# read in the data from a csv file
+data <- Fish
+
+# convert the factor levels to valid R variable names
+data$bleaching_occurred <- factor(make.names(as.character(data$bleaching_occurred)))
+
+# define the training control for repeated cross-validation
+ctrl <- trainControl(method = "repeatedcv", 
+                     number = 5, 
+                     repeats = 50, 
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+
+# create the SVM model using the radial kernel function
+svmModel <- train(bleaching_occurred ~ skipjack_tuna_rate_norm + scombroids_rate_norm + yellowfin_tuna_rate_norm,
+                  data = data,
+                  method = "svmRadial",
+                  trControl = ctrl)
+
+# print the results
+print(svmModel)
+```
+Accuracy(ROC): the hightest one is 68.2%
+
+## KNN: k = 5
+```{r}
+library(caret)
+
+# read in the data from a csv file
+data <- Fish
+
+# convert factor levels to valid variable names
+data$bleaching_occurred <- make.names(as.character(data$bleaching_occurred))
+
+# define the training control for repeated cross-validation
+ctrl <- trainControl(method = "repeatedcv", 
+                     number = 5, 
+                     repeats = 50, 
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+
+# create the k-NN model
+knnModel <- train(bleaching_occurred ~ skipjack_tuna_rate_norm + scombroids_rate_norm + yellowfin_tuna_rate_norm,
+                  data = data,
+                  method = "knn",
+                  trControl = ctrl)
+
+# print the results
+print(knnModel)
+
+```
+Accuracy(ROC): the Hightest accuracy is 71%

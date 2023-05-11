@@ -24,6 +24,8 @@ formula <- as.formula("binary_bleaching ~ yellowfin_tuna_rate_norm + scombroids_
 model <- glm(formula, data = regression_fish, family = "binomial")
 
 
+
+
 # 生成预测概率
 regression_fish$predicted_prob <- predict(model, regression_fish, type = "response")
 
@@ -54,7 +56,7 @@ ui <- fluidPage(
                                fluidRow(
                                  column(12,
                                         verbatimTextOutput("prediction_result"),
-                          
+                                        
                                  )
                                ),
                                fluidRow(
@@ -89,7 +91,6 @@ ui <- fluidPage(
                       
              ),
              
-             
              tabPanel(
                "Graph",
                tabsetPanel(
@@ -121,13 +122,31 @@ ui <- fluidPage(
                )
              )
              
+             
   )
 )
 
 server <- function(input, output, session) {
   # Split the data into a training and testing set
-
+  split_indices <- createDataPartition(merged_effort$average_bleaching, p = 0.8, list = FALSE)
+  training_set <- merged_effort[split_indices, ]
+  testing_set <- merged_effort[-split_indices, ]
+  training_set$bleaching_occurred <- as.factor(ifelse(training_set$average_bleaching > 0, 1, 0))
+  testing_set$bleaching_occurred <- as.factor(ifelse(testing_set$average_bleaching > 0, 1, 0))
+  rf_model <- randomForest(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
+                           data = training_set)
+  rf_predictor <- Predictor$new(rf_model, data = testing_set[, c("clim_sst", "rate_norm", "distance_to_nearest_reef")], y = as.numeric(testing_set$bleaching_occurred), type = "prob")
+  rf_importance <- iml::FeatureImp$new(rf_predictor, loss = "ce")
   
+  split_indices_fish <- createDataPartition(regression_fish$average_bleaching, p = 0.8, list = FALSE)
+  training_set_fish <- regression_fish[split_indices_fish, ]
+  testing_set_fish <- regression_fish[-split_indices_fish, ]
+  training_set_fish$bleaching_occurred <- as.factor(ifelse(training_set_fish$average_bleaching > 0, 1, 0))
+  testing_set_fish$bleaching_occurred <- as.factor(ifelse(testing_set_fish$average_bleaching > 0, 1, 0))
+  rf_model_fish <- randomForest(bleaching_occurred ~ yellowfin_tuna_rate_norm + scombroids_rate_norm + skipjack_tuna_rate_norm,
+                           data = training_set_fish)
+  rf_predictor_fish <- Predictor$new(rf_model_fish, data = testing_set_fish[, c("yellowfin_tuna_rate_norm", "scombroids_rate_norm", "skipjack_tuna_rate_norm")], y = as.numeric(testing_set_fish$bleaching_occurred), type = "prob")
+  rf_importance_fish <- iml::FeatureImp$new(rf_predictor_fish, loss = "ce")
   
   model_prediction <- reactive({
     req(input$predict)
@@ -200,7 +219,7 @@ server <- function(input, output, session) {
   
   leaflet_data <- reactive({
     left_join(reef_merged, reef_data_counts, by = "reef_id") %>%
-      select(latitude, longitude, reef_id, data_count)
+      dplyr::select(latitude, longitude, reef_id, data_count)
   })
   
   # Render the leaflet map
@@ -253,7 +272,7 @@ server <- function(input, output, session) {
     temp_bleaching <- merged_effort %>%
       filter(clim_sst > 270) %>%
       group_by(clim_sst) %>%
-      summarise(mean_bleaching = mean(average_bleaching, na.rm = TRUE))
+      dplyr::summarise(mean_bleaching = mean(average_bleaching, na.rm = TRUE))
     
     ggplot(temp_bleaching, aes(x = clim_sst, y = mean_bleaching)) +
       geom_point() +
@@ -270,7 +289,9 @@ server <- function(input, output, session) {
     yearly_bleaching <- merged_effort %>%
       filter(clim_sst >= 270) %>%
       group_by(year) %>%
-      summarise(mean_bleaching = mean(average_bleaching, na.rm = TRUE))
+      dplyr::summarise(mean_bleaching = mean(average_bleaching, na.rm = TRUE))
+    
+    
     
     # Fit ARIMA model
     arima_model <- auto.arima(yearly_bleaching$mean_bleaching)
@@ -283,22 +304,36 @@ server <- function(input, output, session) {
     yearly_bleaching_forecasted <- bind_rows(
       yearly_bleaching,
       data.frame(
-        year = seq((max(yearly_bleaching$year) + 1), (max(yearly_bleaching$year) + n_years), by = 1),
+        year = base::seq((base::max(yearly_bleaching$year, na.rm = TRUE) + 1), (base::max(yearly_bleaching$year, na.rm = TRUE) + n_years), by = 1),
         mean_bleaching = as.numeric(forecasted_years$mean),
         stringsAsFactors = FALSE
       )
     )
-    
-    # Plot the combined data with ARIMA model predictions
+
+    #Plot the combined data with ARIMA model predictions
     ggplot(yearly_bleaching_forecasted, aes(x = year, y = mean_bleaching)) +
       geom_point() +
       geom_line() +
       labs(x = "Year", y = "Mean Bleaching")
+    
+
   })
   
   output$shap_plot <- renderPlot({
+    
+    plot(rf_importance)
+
+  })
+  
+  output$shap_plot <- renderPlot({
+    
+    plot(rf_importance)
+    
+  })
+  
+  output$shap_plot2 <- renderPlot({
     # Create the SHAP plot
-    plot(shapley_explainer, type = "contribution", col = c("red", "blue"))
+    plot(rf_importance_fish)
   })
   
   
@@ -329,8 +364,8 @@ server <- function(input, output, session) {
     selected_fish <- input$selected_fish
     
     fish_data <- regression_fish %>%
-      select(average_bleaching, all_of(selected_fish)) %>%
-      rename(FishEffort = selected_fish)
+      dplyr::select(average_bleaching, all_of(selected_fish)) %>%
+      dplyr::rename(FishEffort = selected_fish)
     
     fish_lm <- lm(average_bleaching ~ FishEffort, data = fish_data)
     
