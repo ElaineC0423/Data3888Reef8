@@ -13,6 +13,7 @@ library(plotly)
 library(forecast)
 library(iml)
 library(glmnet)
+library(ggplotify)
 
 
 # Read data
@@ -235,7 +236,7 @@ server <- function(input, output, session) {
         lng = ~longitude, lat = ~latitude,
         layerId = ~reef_id,
         popup = ~as.character(reef_id),
-        radius = 3, fillColor = ~fill_color,
+        radius = 6, fillColor = ~fill_color,
         stroke = FALSE, fillOpacity = 1
       )
   })
@@ -319,21 +320,17 @@ server <- function(input, output, session) {
 
   })
   
-  output$shap_plot <- renderPlot({
-    
-    plot(rf_importance)
-
-  })
   
   output$shap_plot <- renderPlot({
     
-    plot(rf_importance)
+    plot(rf_importance_fish)
     
   })
   
   output$shap_plot2 <- renderPlot({
-    # Create the SHAP plot
-    plot(rf_importance_fish)
+    
+    plot(rf_importance)
+    
   })
   
   
