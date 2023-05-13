@@ -1,0 +1,653 @@
+---
+title: "Untitled"
+author: '500033689'
+date: "2023-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Loading in packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(sf)
+```
+
+```{r Loading in the data}
+catch_95 <- read.csv("Data/CatchInd1995_1999.csv") %>% clean_names()
+catch_00 <- read.csv("Data/CatchInd2000_2004.csv") %>% clean_names()
+catch_05 <- read.csv("Data/CatchInd2005_2009.csv") %>% clean_names()
+catch_10 <- read.csv("Data/CatchInd2010_2014.csv") %>% clean_names()
+
+cell <- read_xlsx("Data/Codes.xlsx", sheet = "Cell") %>% clean_names()
+gear <- read_xlsx("Data/Codes.xlsx", sheet = "Gear") %>% clean_names()
+taxa <- read_xlsx("Data/Codes.xlsx", sheet = "Taxa") %>% clean_names()
+country <- read_xlsx("Data/Codes.xlsx", sheet = "Country") %>% clean_names()
+
+```
+
+```{r}
+index <- read.csv("Data/IndexInd.csv") %>% clean_names()
+```
+
+
+Each ID corresponds to a taxa-country-gear-year combination.
+For example, pelagic fishes caught by Chinese fishing vessels using squid hooks in 1970.
+For this report, we focus on yellowfin tuna caught by Indonesian fishing vessels using any type of fishing gear.
+We start by filtering only for Indonesian yellowfin tuna records, and combining across the different year ranges.
+
+```{r Filtering for Indonesian records}
+indo_code <- country %>% filter(fao_name == "Indonesia") %>% pull(country)
+tuna_code <- taxa %>% filter(common_name == "Yellowfin tuna") %>% pull(taxon_key)
+indo_tuna_ids <- index %>% filter(c_number == indo_code, taxonkey == tuna_code) %>% pull(id)
+
+catch_95_filtered <- catch_95 %>% filter(id %in% indo_tuna_ids)
+catch_00_filtered <- catch_00 %>% filter(id %in% indo_tuna_ids)
+catch_05_filtered <- catch_05 %>% filter(id %in% indo_tuna_ids)
+catch_10_filtered <- catch_10 %>% filter(id %in% indo_tuna_ids)
+
+catch_all <- rbind(catch_95_filtered, catch_00_filtered, catch_05_filtered, catch_10_filtered)
+```
+
+We now:
+
+1. Merge in the location, year, and gear data.
+2. Filter down to the Indonesian region (we were only considering Indonesian vessels before).
+3. Aggregate results across fishing gears.
+
+```{r Merging the data}
+catch_cleaned <- catch_all %>% 
+  left_join(cell, by = "cell") %>% 
+  left_join(index[, c("id", "i_year", "gear")], by = "id") %>% 
+  filter(lat_centre >= -10, lat_centre <= 13, lon_centre >= 93, lon_centre <= 134) %>% 
+  group_by(lat_centre, lon_centre, i_year) %>% 
+  summarise(sum_reported = sum(reported),
+            area = mean(ocean_areasqkm)) %>% 
+  ungroup() %>% 
+  arrange(lat_centre, lon_centre, i_year) %>% 
+  rename(latitude = lat_centre, longitude = lon_centre, year = i_year) %>% 
+  mutate(rate_reported = round(1000*sum_reported/area, 4)) %>% # Landings per 1000 square kilometres
+  select(-sum_reported, -area)
+```
+
+We now load in the reef data from the labs and filter it to have the same range as the fishing data.
+
+```{r Loading in the reef data}
+reef <- read.csv("Data/Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv") %>% 
+  clean_names() %>% 
+  filter(latitude_degrees >= min(catch_cleaned$latitude), latitude_degrees <= max(catch_cleaned$latitude), 
+         longitude_degrees >= min(catch_cleaned$longitude), longitude_degrees <= max(catch_cleaned$longitude),
+         year >= min(catch_cleaned$year), year <= max(catch_cleaned$year)) %>% 
+  select(reef_id, latitude_degrees, longitude_degrees, year, average_bleaching, clim_sst) %>% 
+  rename(latitude = latitude_degrees, longitude = longitude_degrees)
+```
+
+We perform a nearest-neighbour join between the reef and catch datasets.
+To make things easier (?) we loop through and do processing for each year.
+
+```{r Nearest-neighbour join}
+
+merged <- data.frame()
+
+for (curr_year in unique(reef$year)) {
+  catch_sf <- catch_cleaned %>% 
+    filter(year == curr_year) %>% 
+    as.data.frame() %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+  
+  reef_sf <- reef %>% 
+    filter(year == curr_year) %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+
+  # Compute distances between each point in catch_sf and reef_sf
+  distances <- st_distance(catch_sf, reef_sf)
+
+  # Get the minimum distance for each catch point
+  min_distances <- apply(distances, 1, min)
+
+  # Join the datasets based on nearest features
+  merged_year <- st_join(catch_sf, reef_sf, join = st_nearest_feature) %>% 
+    as.data.frame() %>% 
+    mutate(latitude = st_coordinates(.$geometry)[, 2], longitude = st_coordinates(.$geometry)[, 1]) %>% 
+    select(-year.x, -year.y, -geometry) %>% 
+    mutate(year = curr_year)
+
+  # Add the minimum distance as a new column to the merged_year dataframe
+  merged_year$distance_to_nearest_reef <- min_distances
+
+  rownames(merged_year) <- NULL
+  merged <- rbind(merged, merged_year)
+}
+
+
+
+
+
+
+```
+
+```{r}
+merged
+```
+
+
+We now load in and merge the SAU fishing effort data, before normalising the catch data by fishing effort.
+
+```{r Fishing effort data}
+effort <- read.csv("Data/SAU Effort FishingEntity 83 v50-1.csv") %>% clean_names() %>% 
+  filter(fishing_sector == "Industrial") %>% 
+  group_by(year) %>% 
+  summarise(sum_effort = sum(effort)) %>% 
+  mutate(sum_effort = sum_effort/1e+06)
+
+merged_effort <- merged %>% 
+  left_join(effort, by = "year") %>% 
+  filter(!is.na(sum_effort)) %>% 
+  mutate(rate_norm = rate_reported/sum_effort) %>% 
+  select(-rate_reported)
+
+write.csv(merged_effort, file = "merged.csv")
+```
+
+We now perform some exploratory data analysis.
+
+```{r EDA}
+merged_effort <- read.csv("merged.csv")
+
+merged_effort %>% 
+ggplot(aes(x = average_bleaching, y = rate_norm)) +
+  geom_point()
+
+merged_effort %>% 
+  mutate(bleached = ifelse(average_bleaching > 0, "Bleached", "Not bleached")) %>% 
+  ggplot(aes(x = bleached, y = log(rate_norm))) +
+  geom_boxplot()
+
+
+
+```
+```{r}
+library(caret)
+set.seed(123)
+
+# Split the data into a training and testing set
+split_indices <- createDataPartition(merged_effort$average_bleaching, p = 0.8, list = FALSE)
+training_set <- merged_effort[split_indices, ]
+testing_set <- merged_effort[-split_indices, ]
+
+```
+```{r}
+# Model 1: Temperature
+model_temp <- lm(average_bleaching ~ clim_sst, data = training_set)
+
+# Model 2: Fishing rate_norm
+model_rate_norm <- lm(average_bleaching ~ rate_norm, data = training_set)
+
+# Model 3: Fishing distance
+model_distance <- lm(average_bleaching ~ distance_to_nearest_reef, data = training_set)
+
+
+
+
+```
+
+```{r}
+# Model 1: Temperature
+summary(model_temp)
+
+# Model 2: Fishing rate_norm
+summary(model_rate_norm)
+
+# Model 3: Fishing distance
+summary(model_distance)
+
+```
+
+
+```{r}
+# Model 4: Temperature + Fishing rate_norm + Fishing distance
+model_all <- lm(average_bleaching ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set)
+
+```
+
+```{r}
+
+summary(model_all)
+
+
+```
+
+
+```{r}
+library(Metrics)
+
+# Evaluate model performance
+pred_temp <- predict(model_temp, testing_set)
+pred_rate_norm <- predict(model_rate_norm, testing_set)
+pred_distance <- predict(model_distance, testing_set)
+pred_all <- predict(model_all, testing_set)
+
+mse_temp <- mse(testing_set$average_bleaching, pred_temp)
+mse_rate_norm <- mse(testing_set$average_bleaching, pred_rate_norm)
+mse_distance <- mse(testing_set$average_bleaching, pred_distance)
+mse_all <- mse(testing_set$average_bleaching, pred_all)
+
+cat("MSE for Temperature model:", mse_temp, "\n")
+cat("MSE for Fishing rate_norm model:", mse_rate_norm, "\n")
+cat("MSE for Fishing distance model:", mse_distance, "\n")
+cat("MSE for Combined model:", mse_all, "\n")
+
+```
+```{r}
+library(ggplot2)
+
+# Create a data frame for plotting
+mse_data <- data.frame(
+  Model = factor(c("Temperature", "Fishing rate_norm", "Fishing distance", "Combined")),
+  MSE = c(mse_temp, mse_rate_norm, mse_distance, mse_all)
+)
+
+# Create the bar plot
+ggplot(mse_data, aes(x = Model, y = MSE, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.7, show.legend = FALSE) +
+  labs(title = "MSE of each model", x = "Model", y = "Mean Squared Error") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+```{r}
+# Install and load the randomForest package
+library(randomForest)
+
+# Create the random forest model
+model_rf <- randomForest(average_bleaching ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set, ntree = 500, mtry = 2, importance = TRUE)
+
+# Evaluate the random forest model
+pred_rf <- predict(model_rf, testing_set)
+mse_rf <- mse(testing_set$average_bleaching, pred_rf)
+cat("MSE for Random Forest model:", mse_rf, "\n")
+
+# Plot the variable importance
+varImpPlot(model_rf)
+
+```
+```{r}
+# Create binary target variable
+training_set$bleaching_occurred <- as.factor(ifelse(training_set$average_bleaching > 0, 1, 0))
+testing_set$bleaching_occurred <- as.factor(ifelse(testing_set$average_bleaching > 0, 1, 0))
+
+
+library(randomForest)
+
+# Random Forest Model
+rf_model <- randomForest(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
+                         data = training_set)
+rf_pred <- predict(rf_model, testing_set)
+
+# Logistic Regression Model
+logit_model <- glm(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, 
+                   data = training_set, family = binomial)
+logit_pred <- predict(logit_model, testing_set, type = "response")
+logit_pred <- ifelse(logit_pred > 0.5, 1, 0)
+
+# Calculate accuracy
+rf_accuracy <- mean(rf_pred == testing_set$bleaching_occurred)
+logit_accuracy <- mean(logit_pred == testing_set$bleaching_occurred)
+
+cat("Accuracy of Random Forest Model:", rf_accuracy, "\n")
+cat("Accuracy of Logistic Regression Model:", logit_accuracy)
+
+```
+
+
+```{r}
+summary(logit_model)
+
+```
+
+```{r}
+rf_model$terms
+```
+```{r}
+importance(rf_model)
+```
+
+```{r}
+library(caret)
+library(e1071)
+library(kernlab)
+library(class)
+library(xgboost)
+library(nnet)
+```
+
+```{r}
+# 1. SVM
+svm_model_fit <- svm(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set)
+svm_predictions <- predict(svm_model_fit, newdata = testing_set)
+svm_accuracy <- mean(svm_predictions == testing_set$bleaching_occurred)
+
+# 2. K-NN
+knn_model_fit <- knn3(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set)
+knn_predictions <- predict(knn_model_fit, newdata = testing_set)
+knn_accuracy <- mean(knn_predictions == testing_set$bleaching_occurred)
+
+# 3. NN
+nn_model_fit <- nnet(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set, linout = FALSE, trace = FALSE, size = 3)
+nn_predictions <- predict(nn_model_fit, newdata = testing_set, type = "class")
+nn_accuracy <- mean(nn_predictions == testing_set$bleaching_occurred)
+
+# Print accuracies
+cat("SVM accuracy:", svm_accuracy, "\n")
+cat("K-NN accuracy:", knn_accuracy, "\n")
+cat("NN accuracy:", nn_accuracy, "\n")
+```
+```{r}
+library(GGally)
+
+# Add predictions to the testing set
+testing_set$svm_predictions <- svm_predictions
+testing_set$knn_predictions <- knn_predictions
+testing_set$nn_predictions <- nn_predictions
+
+# SVM
+svm_plot <- ggpairs(testing_set, columns = c("clim_sst", "rate_norm", "distance_to_nearest_reef"), mapping = aes(color = as.factor(svm_predictions), alpha = 0.6)) + theme_bw()
+svm_plot <- svm_plot + ggtitle("SVM Predictions")
+
+# K-NN
+knn_plot <- ggpairs(testing_set, columns = c("clim_sst", "rate_norm", "distance_to_nearest_reef"), mapping = aes(color = as.factor(knn_predictions), alpha = 0.6)) + theme_bw()
+knn_plot <- knn_plot + ggtitle("K-NN Predictions")
+
+# NN
+nn_plot <- ggpairs(testing_set, columns = c("clim_sst", "rate_norm", "distance_to_nearest_reef"), mapping = aes(color = as.factor(nn_predictions), alpha = 0.6)) + theme_bw()
+nn_plot <- nn_plot + ggtitle("NN Predictions")
+
+```
+
+```{r}
+
+library(tidyr)
+
+# Add predictions to the testing set
+testing_set$svm_predictions <- svm_predictions
+testing_set$knn_predictions <- knn_predictions
+testing_set$nn_predictions <- nn_predictions
+
+# Convert the data to long format
+long_data <- testing_set %>% 
+  gather("Model", "Prediction", svm_predictions, knn_predictions, nn_predictions)
+```
+```{r}
+library(scatterplot3d)
+
+# Add predictions to the testing set
+testing_set$svm_predictions <- svm_predictions
+testing_set$knn_predictions <- knn_predictions
+testing_set$nn_predictions <- nn_predictions
+
+# Create color vectors for each model's predictions
+svm_colors <- ifelse(testing_set$svm_predictions == 0, "blue", "red")
+knn_colors <- ifelse(testing_set$knn_predictions == 0, "blue", "red")
+nn_colors <- ifelse(testing_set$nn_predictions == 0, "blue", "red")
+
+# SVM
+svm_3d_plot <- scatterplot3d(testing_set$clim_sst, testing_set$rate_norm, testing_set$distance_to_nearest_reef, color = svm_colors, pch = 19, main = "SVM Predictions", xlab = "Clim_SST", ylab = "Rate_Norm", zlab = "Distance_to_Nearest_Reef")
+
+# K-NN
+knn_3d_plot <- scatterplot3d(testing_set$clim_sst, testing_set$rate_norm, testing_set$distance_to_nearest_reef, color = knn_colors, pch = 19, main = "K-NN Predictions", xlab = "Clim_SST", ylab = "Rate_Norm", zlab = "Distance_to_Nearest_Reef")
+
+# NN
+nn_3d_plot <- scatterplot3d(testing_set$clim_sst, testing_set$rate_norm, testing_set$distance_to_nearest_reef, color = nn_colors, pch = 19, main = "NN Predictions", xlab = "Clim_SST", ylab = "Rate_Norm", zlab = "Distance_to_Nearest_Reef")
+
+
+
+```
+
+```{r corss validation}
+library(caret)
+library(randomForest)
+library(kernlab)
+library(nnet)
+
+
+
+set.seed(123)
+num_folds <- 10
+train_control <- trainControl(method = "repeatedcv", number = num_folds, repeats = 20)
+
+
+svm_model <- train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
+                   data = training_set,
+                   method = "svmRadial",
+                   trControl = train_control)
+
+
+knn_model <- train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
+                   data = training_set,
+                   method = "knn",
+                   trControl = train_control)
+
+```
+
+```{r cross vaildation for accuracy}
+# SVM
+svm_predictions <- predict(svm_model, newdata = testing_set)
+svm_accuracy <- mean(svm_predictions == testing_set$bleaching_occurred)
+
+# K-NN
+knn_predictions <- predict(knn_model, newdata = testing_set)
+knn_accuracy <- mean(knn_predictions == testing_set$bleaching_occurred)
+
+knn_accuracy 
+svm_accuracy
+```
+
+Using k-fold cross validation to evaluate stability by calculating the average performance across each k iteration. 
+```{r cross vaildation for stability}
+k = 10
+folds <- createFolds(merged$average_bleaching, k = 10, list = TRUE, returnTrain = FALSE)
+accuracies <- numeric(k)
+
+accuracy <- function(actual, predicted) {
+  return(sum(actual == predicted) / length(actual))
+}
+
+for (i in 1:10) {
+  cat("Iteration:", i, "\n")
+  
+  # Split the data into training and validation sets
+  train_indices <- unlist(folds[-i])
+  val_indices <- unlist(folds[i])
+  
+  train_data <- merged[train_indices, ]
+  val_data <- merged[val_indices, ]
+  
+  # Create dataframes with only numeric columns
+  numeric_cols_train <- sapply(train_data, is.numeric)
+  train_data_numeric <- train_data[, numeric_cols_train]
+  
+  numeric_cols_val <- sapply(val_data, is.numeric)
+  val_data_numeric <- val_data[, numeric_cols_val]
+  
+  normalize_data <- function(data) {
+    return((data - min(data)) / (max(data) - min(data)))
+  }
+  
+  train_data_normalized <- as.data.frame(lapply(train_data_numeric[, -3], normalize_data))
+  val_data_normalized <- as.data.frame(lapply(val_data_numeric[, -3], normalize_data))
+  
+  knn_model <- knn(train = train_data_normalized, test = val_data_normalized, cl = train_data$average_bleaching, k = 10)
+  
+  # Evaluate the model's accuracy on the validation set
+  accuracies[i] <- accuracy(actual = val_data$average_bleaching, predicted = knn_model)
+}
+
+mean_accuracy <- mean(accuracies)
+std_accuracy <- sd(accuracies)
+
+mean_accuracy
+std_accuracy
+```
+
+```{r}
+nnetGrid <- expand.grid(.size = c(3), .decay = c(0))
+
+nn_model <- train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
+                  data = training_set,
+                  method = "nnet",
+                  trControl = train_control,
+                  tuneGrid = nnetGrid)
+nn_predictions <- predict(nn_model, newdata = testing_set)
+nn_accuracy <- mean(nn_predictions == testing_set$bleaching_occurred)
+nn_accuracy
+```
+```{r}
+merged <- read.csv("merged.csv")
+reef_data <- read.csv("Data/Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv") %>%
+  clean_names() %>%
+  select(reef_id, latitude_degrees, longitude_degrees)
+
+
+merged_with_reef_coords <- left_join(merged, reef_data, by = "reef_id")
+
+
+unique_reefs <- merged_with_reef_coords %>%
+  distinct(latitude_degrees, longitude_degrees)
+```
+
+
+```{r}
+# 读取数据
+merged <- read.csv("merged.csv")
+reef_data <- read.csv("Data/Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv") %>%
+  clean_names() %>%
+  select(reef_id, latitude_degrees, longitude_degrees)
+
+
+merged_with_reef_coords <- left_join(merged, reef_data, by = "reef_id")
+
+
+unique_reefs <- merged_with_reef_coords %>%
+  distinct(reef_id, latitude_degrees, longitude_degrees)
+
+
+filtered_merged_with_reef_coords <- merged_with_reef_coords %>%
+  group_by(reef_id, year) %>%
+  slice_min(distance_to_nearest_reef, n = 1) %>%
+  ungroup()
+```
+```{r}
+filtered_merged_with_reef_coords
+```
+
+```{r}
+reef_merged <- data.frame()
+
+for (curr_year in unique(reef$year)) {
+  catch_sf <- catch_cleaned %>% 
+    filter(year == curr_year) %>% 
+    as.data.frame() %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+  
+  reef_sf <- reef %>% 
+    filter(year == curr_year) %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+
+  # Compute distances between each point in catch_sf and reef_sf
+  distances <- st_distance(reef_sf, catch_sf)
+
+  # Get the minimum distance for each reef point
+  min_distances <- apply(distances, 1, min)
+
+  # Join the datasets based on nearest features
+  reef_merged_year <- st_join(reef_sf, catch_sf, join = st_nearest_feature) %>% 
+    as.data.frame() %>% 
+    mutate(latitude = st_coordinates(.$geometry)[, 2], longitude = st_coordinates(.$geometry)[, 1]) %>% 
+    select(-year.x, -year.y, -geometry) %>% 
+    mutate(year = curr_year)
+
+  # Add the minimum distance as a new column to the reef_merged_year dataframe
+  reef_merged_year$distance_to_nearest_catch <- min_distances
+
+  rownames(reef_merged_year) <- NULL
+  reef_merged <- rbind(reef_merged, reef_merged_year)
+}
+
+reef_merged
+
+
+
+
+merged_effort <- reef_merged %>% 
+  left_join(effort, by = "year") %>% 
+  filter(!is.na(sum_effort)) %>% 
+  mutate(rate_norm = rate_reported/sum_effort) %>% 
+  select(-rate_reported)
+
+write.csv(merged_effort, file = "reef_merged.csv")
+
+```
+```{r learning curve for scalability}
+library(MLmetrics)
+
+# Convert the target variable to a factor if it's not already
+merged$average_bleaching <- as.factor(merged$average_bleaching)
+
+# Make the factor levels valid R variable names
+levels(merged$average_bleaching) <- make.names(levels(merged$average_bleaching), unique = TRUE)
+
+set.seed(123)
+scale_trainIndex <- createDataPartition(merged$average_bleaching, p = 0.75, list = FALSE, times = 1)
+scale_train_set <- merged[scale_trainIndex,]
+scale_test_set <- merged[-scale_trainIndex,]
+
+# Create a vector with the relative proportions of data to use for each learning curve point
+scale_train_sizes <- seq(0.1, 1, by = 0.1)
+
+# Define the resampling strategy
+scale_train_control <- trainControl(method = "cv", number = 5,
+                              returnResamp = "all",
+                              savePredictions = "final",
+                              verboseIter = TRUE,
+                              classProbs = TRUE,
+                              summaryFunction = multiClassSummary, # Use multiClassSummary for multi-class problems
+                              index = createResample(scale_train_set$average_bleaching, times = 5, list = TRUE),
+                              indexOut = createResample(scale_train_set$average_bleaching, times = 5, list = TRUE),
+                              timingSamps = scale_train_sizes)
+
+scale_model <- train(average_bleaching ~ ., data = scale_train_set,
+               method = "knn",
+               trControl = trainControl(method = "cv", number = 5),
+               metric = "Accuracy")
+```
+```{r learning curve for scalability}
+learning_curve_data <- scale_model$results[, c("ROC", "n", "DataIndex")]
+colnames(learning_curve_data) <- c("ROC_AUC", "Training_Size", "Fold")
+
+# Create a ggplot object
+learning_curve_plot <- ggplot(learning_curve_data, aes(x = Training_Size, y = ROC_AUC, group = Fold)) +
+  geom_line(aes(col = Fold), size = 1, alpha = 0.7) +
+  geom_point(aes(col = Fold), size = 2, alpha = 0.7) +
+  theme_bw() +
+  labs(x = "Training Size", y = "ROC AUC", title = "Learning Curve") +
+  theme(legend.position = "bottom")
+
+# Display the plot
+print(learning_curve_plot)
+
+```
+
+```{r shapley for interpretation evaluation}
+library(shapper)
+library(shap)
+
+explainer <- shapExplainer(svm_model, training_set)
+shap_values <- shapValues(explainer, testing_set)
+shapSummaryPlot(shap_values, testing_set)
+
+```
+
