@@ -183,16 +183,19 @@ server <- function(input, output, session) {
     
     output$interactive_plot <- renderPlotly({
       p <- plot_ly() %>%
-        add_trace(data = training_set %>% filter(bleaching_occurred == 0), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = I("green"), type = "scatter3d", mode = "markers", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1))) %>%
-        add_trace(data = training_set %>% filter(bleaching_occurred == 1), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = I("yellow"), type = "scatter3d", mode = "markers", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1)))
+        add_trace(data = training_set %>% filter(bleaching_occurred == 0), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = "green", type = "scatter3d", mode = "markers", name = "No Bleaching", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1))) %>%
+        add_trace(data = training_set %>% filter(bleaching_occurred == 1), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = "yellow", type = "scatter3d", mode = "markers", name = "Bleaching Occurred", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1))) 
       
       if (nrow(new_points()) > 0) {
         p <- p %>%
-          add_trace(data = new_points(), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = ~point_color, text = ~point_label, type = "scatter3d", mode = "markers+text", marker = list(symbol = "circle", size = 8, line = list(color = "black", width = 2)))
+          add_trace(data = new_points(), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = ~point_color, text = ~point_label, type = "scatter3d", mode = "markers+text", name = "New Points", marker = list(symbol = "circle", size = 8, line = list(color = "black", width = 2)))
       }
+      
+      p <- p %>% layout(legend = list(traceorder = "normal", itemsizing = "constant"))
       
       p
     })
+    
   })
   
   
@@ -203,9 +206,9 @@ server <- function(input, output, session) {
     print(pred_numeric)
     
     if (pred_numeric == 1) { # Update the condition to check the numeric value
-      cat("Predicted: Coral bleaching occurred.\n")
+      cat("Predicted: Reef health declined\n")
     } else {
-      cat("Predicted: Coral bleaching did not occur.\n")
+      cat("Predicted: Reef health increased\n")
     }
   })
   
@@ -295,7 +298,13 @@ server <- function(input, output, session) {
     
     
     # Fit ARIMA model
-    arima_model <- auto.arima(yearly_bleaching$mean_bleaching)
+    # Fit ARIMA model with custom parameters
+    # Perform first-order differencing
+    # Perform first-order differencing
+    yearly_bleaching$mean_bleaching_diff <- c(NA, diff(yearly_bleaching$mean_bleaching))
+    
+    
+    arima_model <- arima(yearly_bleaching$mean_bleaching_diff, order = c(1,1,0)) # Here you can change the order parameters (p,d,q) as per your requirement
     
     # Forecast the next n years
     n_years <- input$num_years
@@ -310,12 +319,13 @@ server <- function(input, output, session) {
         stringsAsFactors = FALSE
       )
     )
-
+    
     #Plot the combined data with ARIMA model predictions
     ggplot(yearly_bleaching_forecasted, aes(x = year, y = mean_bleaching)) +
       geom_point() +
       geom_line() +
       labs(x = "Year", y = "Mean Bleaching")
+    
     
 
   })
