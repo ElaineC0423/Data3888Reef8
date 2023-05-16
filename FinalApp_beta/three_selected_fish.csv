@@ -1,4 +1,4 @@
-,reef_id,average_bleaching,clim_sst,latitude,longitude,year,yellowfin_tuna_sum_effort,yellowfin_tuna_rate_norm,scombroids_sum_effort,scombroids_rate_norm,skipjack_tuna_sum_effort,skipjack_tuna_rate_norm
+,reef_id,average_bleaching,clim_sst,latitude,longitude,year,yellowfin_tuna_sum_effort,yellowfin_tuna_rate_norm,mackerel_sum_effort,mackerel_rate_norm,skipjack_tuna_sum_effort,skipjack_tuna_rate_norm
 1,102.40.2.9E.5.56.28.4N,1,303.57,5.941222222,102.6674722,2003,163.2165868,0.454263267,163.2165868,0.000144593,163.2165868,0.045084266
 2,102.40.2.9E.5.56.28.4N,0.75,303.57,5.941222222,102.6674722,2003,163.2165868,0.454263267,163.2165868,0.000144593,163.2165868,0.045084266
 3,102.43.23.4E.5.55.53.7N,0.5,303.35,5.931583333,102.7231667,2003,163.2165868,0.454263267,163.2165868,0.000144593,163.2165868,0.045084266

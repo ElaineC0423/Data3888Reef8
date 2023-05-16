@@ -14,6 +14,7 @@ library(forecast)
 library(iml)
 library(glmnet)
 library(ggplotify)
+library(shinyalert)
 
 
 # Read data
@@ -21,7 +22,7 @@ reef_merged <- read.csv("reef_merged.csv") %>% distinct()
 merged_effort <- read.csv("merged.csv")
 regression_fish <- read.csv("three_selected_fish.csv")
 regression_fish$binary_bleaching <- ifelse(regression_fish$average_bleaching > 0, 1, 0)
-formula <- as.formula("binary_bleaching ~ yellowfin_tuna_rate_norm + scombroids_rate_norm + skipjack_tuna_rate_norm")
+formula <- as.formula("binary_bleaching ~ yellowfin_tuna_rate_norm + mackerel_rate_norm + skipjack_tuna_rate_norm")
 model <- glm(formula, data = regression_fish, family = "binomial")
 
 
@@ -48,8 +49,8 @@ ui <- fluidPage(
              tabPanel("Model Prediction",
                       fluidRow(
                         column(3, wellPanel(
-                          numericInput("ssta", "Sea Surface Temperature Anomaly (SSTA):", value = 0, min = -5, max = 5),
-                          numericInput("fish", "Fishing Rate:", value = 0, min = 0, max = 100),
+                          numericInput("ssta", "Sea Surface Temperature Anomaly (Normally Ranged 250 ~ 320):", value = 0, min = -5, max = 5),
+                          numericInput("fish", "Fishing Rate (Should be a number from 0 to 1):", value = 0, min = 0, max = 100),
                           numericInput("distance", "Distance to Nearest Reef (km):", value = 0, min = 0, max = 100),
                           actionButton("predict", "Predict")
                         )),
@@ -68,10 +69,10 @@ ui <- fluidPage(
                         )
                       ),
                       fluidRow(
-                        column(3, wellPanel(
-                          numericInput("yellowfin_tuna_rate_norm", "Yellowfin Tuna RateNorm:", value = NULL),
-                          numericInput("scombroids_rate_norm", "Scombroids RateNorm:", value = NULL),
-                          numericInput("skipjack_tuna_rate_norm", "Skipjack Tuna RateNorm:", value = NULL),
+                        column(4, wellPanel(
+                          numericInput("yellowfin_tuna_rate_norm",actionButton("yellowfin_tuna","Yellowfin Tuna Rate (Should be a Number from 0 to 1):"), value = NULL),
+                          numericInput("mackerel_rate_norm", actionButton("mackerel","Mackerel Rate (Should be a Number from 0 to 1): "), value = NULL),
+                          numericInput("skipjack_tuna_rate_norm", actionButton("skipjack_Tuna","Skipjack Tuna Rate (Should be a Number from 0 to 1):"), value = NULL),
                           actionButton("predict_fish", "Predict")
                         )),
                         column(9,
@@ -86,6 +87,15 @@ ui <- fluidPage(
                                         plotlyOutput("Fish_interactive_plot", height = "500px")
                                  )
                                )
+                        )
+                      ),
+                      fluidRow(
+                        column(3,
+                               sliderInput("increase_rate", "Increase rate:", min = 1, max = 1.3, value = 1.1, step = 0.05),
+                               actionButton("predict_map", "Predict")
+                        ),
+                        column(9,
+                               leafletOutput("predicted_map", height = "500px")
                         )
                       )
                       
@@ -114,7 +124,7 @@ ui <- fluidPage(
                      column(4, wellPanel(
                        selectInput("selected_fish", "Select a fish:", 
                                    choices = c("Yellowfin Tuna" = "yellowfin_tuna_rate_norm",
-                                               "Scombroids" = "scombroids_rate_norm",
+                                               "Mackerel" = "mackerel_rate_norm",
                                                "Skipjack Tuna" = "skipjack_tuna_rate_norm"))
                      )),
                      column(8, plotOutput("bleaching_by_fish"))
@@ -139,14 +149,16 @@ server <- function(input, output, session) {
   rf_predictor <- Predictor$new(rf_model, data = testing_set[, c("clim_sst", "rate_norm", "distance_to_nearest_reef")], y = as.numeric(testing_set$bleaching_occurred), type = "prob")
   rf_importance <- iml::FeatureImp$new(rf_predictor, loss = "ce")
   
+  
   split_indices_fish <- createDataPartition(regression_fish$average_bleaching, p = 0.8, list = FALSE)
   training_set_fish <- regression_fish[split_indices_fish, ]
   testing_set_fish <- regression_fish[-split_indices_fish, ]
   training_set_fish$bleaching_occurred <- as.factor(ifelse(training_set_fish$average_bleaching > 0, 1, 0))
   testing_set_fish$bleaching_occurred <- as.factor(ifelse(testing_set_fish$average_bleaching > 0, 1, 0))
-  rf_model_fish <- randomForest(bleaching_occurred ~ yellowfin_tuna_rate_norm + scombroids_rate_norm + skipjack_tuna_rate_norm,
+  set.seed(1234)
+  rf_model_fish <- randomForest(bleaching_occurred ~ yellowfin_tuna_rate_norm + mackerel_rate_norm + skipjack_tuna_rate_norm,
                            data = training_set_fish)
-  rf_predictor_fish <- Predictor$new(rf_model_fish, data = testing_set_fish[, c("yellowfin_tuna_rate_norm", "scombroids_rate_norm", "skipjack_tuna_rate_norm")], y = as.numeric(testing_set_fish$bleaching_occurred), type = "prob")
+  rf_predictor_fish <- Predictor$new(rf_model_fish, data = testing_set_fish[, c("yellowfin_tuna_rate_norm", "mackerel_rate_norm", "skipjack_tuna_rate_norm")], y = as.numeric(testing_set_fish$bleaching_occurred), type = "prob")
   rf_importance_fish <- iml::FeatureImp$new(rf_predictor_fish, loss = "ce")
   
   model_prediction <- reactive({
@@ -223,15 +235,18 @@ server <- function(input, output, session) {
   
   leaflet_data <- reactive({
     left_join(reef_merged, reef_data_counts, by = "reef_id") %>%
-      dplyr::select(latitude, longitude, reef_id, data_count)
+      dplyr::select(latitude, longitude, reef_id, data_count, average_bleaching)
   })
   
-  # Render the leaflet map
   output$map <- renderLeaflet({
     leaflet_data() %>%
       mutate(fill_color = case_when(
-        data_count <= 2 ~ "gray",
-        TRUE ~ "red"
+        average_bleaching > 0 ~ "red",
+        TRUE ~ "blue"
+      ),
+      fill_opacity = case_when(
+        data_count <= 2 ~ 0.1,
+        TRUE ~ 1
       )) %>%
       leaflet() %>%
       addTiles() %>%
@@ -240,9 +255,11 @@ server <- function(input, output, session) {
         layerId = ~reef_id,
         popup = ~as.character(reef_id),
         radius = 6, fillColor = ~fill_color,
-        stroke = FALSE, fillOpacity = 1
+        stroke = FALSE, fillOpacity = ~fill_opacity
       )
   })
+  
+  
   
   # Create a reactive expression for clicked_reef
   clicked_reef <- reactiveVal(NULL)
@@ -349,7 +366,7 @@ server <- function(input, output, session) {
     
     input_data <- data.frame(
       yellowfin_tuna_rate_norm = input$yellowfin_tuna_rate_norm,
-      scombroids_rate_norm = input$scombroids_rate_norm,
+      mackerel_rate_norm = input$mackerel_rate_norm,
       skipjack_tuna_rate_norm = input$skipjack_tuna_rate_norm
     )
     pred <- predict(model, input_data, type = "response") 
@@ -385,6 +402,89 @@ server <- function(input, output, session) {
         title = paste("Bleaching by", input$selected_fish)
       )
   })
+  
+  observeEvent(input$yellowfin_tuna, {
+    # Show a modal when the button is pressed
+    shinyalert("Yellowfin Tuna", "Scientific name: Thunnus albacares
+
+Family: Scombridae
+
+Other names: Yellow-finned albacore, Pacific long-tailed tuna, Allison’s tuna
+
+Description: Yellowfin tuna have torpedo-shaped bodies with dark metallic blue backs, yellow sides, and a silver belly. They have very long anal and dorsal fins that are bright yellow, as are their finlets.
+
+Size (length and weight): Up to 2.1 metres in length and 200 kg. Commonly found at 50‑90 cm in length and 100 kg.
+
+Life span: Up to about 7 years.
+
+", type = "success")
+  })
+  
+  observeEvent(input$skipjack_Tuna, {
+    # Show a modal when the button is pressed
+    shinyalert("Yellowfin Tuna", "Scientific name: Scomber australasicus
+
+Family: Scombridae
+
+Other names: Pacific mackerel, common mackerel, English mackerel, school mackerel, spotted chub mackerel, spotted mackerel, chub mackerel, Japanese mackerel, southern mackerel, slimy mackerel, slimies
+
+Description: Blue mackerel have a fusiform (‘spindle-like’) body covered in small scales. They have bluish to greenish backs and pale spotted bellies, with dark bars on the upper sides. Both the second dorsal fin and anal fin are followed by five to six finlets. The eyes have adipose (fatty tissue) eyelids that leave a vertical slit over the pupils.
+
+Size (length and weight): Up to 65 cm in length and 1.5 kg. Commonly found at 20‑35 cm in length and 0.2‑0.7 kg.
+
+Life span: Up to 7 years, but more commonly 1‑3 years.
+
+", type = "success")
+  })
+  
+  observeEvent(input$mackerel, {
+    # Show a modal when the button is pressed
+    shinyalert("markerel", "Scientific name: Scomber australasicus
+
+Family: Scombridae
+
+Other names: Pacific mackerel, common mackerel, English mackerel, school mackerel, spotted chub mackerel, spotted mackerel, chub mackerel, Japanese mackerel, southern mackerel, slimy mackerel, slimies
+
+Description: Blue mackerel have a fusiform (‘spindle-like’) body covered in small scales. They have bluish to greenish backs and pale spotted bellies, with dark bars on the upper sides. Both the second dorsal fin and anal fin are followed by five to six finlets. The eyes have adipose (fatty tissue) eyelids that leave a vertical slit over the pupils.
+
+Size (length and weight): Up to 65 cm in length and 1.5 kg. Commonly found at 20‑35 cm in length and 0.2‑0.7 kg.
+
+Life span: Up to 7 years, but more commonly 1‑3 years.
+
+", type = "success")
+  })
+  
+  output$predicted_map <- renderLeaflet({
+    leaflet() %>% addTiles()
+  })
+  
+  
+  observeEvent(input$predict_map, {
+    # 复制原始数据
+    new_data <- regression_fish
+    
+    # 增加鱼的数量
+    new_data$yellowfin_tuna_rate_norm <- new_data$yellowfin_tuna_rate_norm * input$increase_rate
+    new_data$mackerel_rate_norm <- new_data$mackerel_rate_norm * input$increase_rate
+    new_data$skipjack_tuna_rate_norm <- new_data$skipjack_tuna_rate_norm * input$increase_rate
+    
+    # 使用模型生成预测
+    new_data$predicted_bleaching <- predict(rf_model_fish, newdata = new_data, type = "prob")[,2]
+    mean_values <- mean(new_data$predicted_bleaching)
+    print(mean_values)
+    # 更新地图
+    leafletProxy("predicted_map", session) %>%
+      clearMarkers() %>%
+      addCircleMarkers(
+        lng = ~longitude, 
+        lat = ~latitude, 
+        color = ~ifelse(predicted_bleaching > 0.4, "red", "blue"),  
+        radius = 6,
+        data = new_data
+      )
+  })
+  
+  
   
   
 }
