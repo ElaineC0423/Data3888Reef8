@@ -26,9 +26,6 @@ formula <- as.formula("binary_bleaching ~ yellowfin_tuna_rate_norm + mackerel_ra
 model <- glm(formula, data = regression_fish, family = "binomial")
 
 
-
-
-# 生成预测概率
 regression_fish$predicted_prob <- predict(model, regression_fish, type = "response")
 
 
@@ -52,7 +49,8 @@ ui <- fluidPage(
                           numericInput("ssta", "Sea Surface Temperature Anomaly (Normally Ranged 250 ~ 320):", value = 0, min = -5, max = 5),
                           numericInput("fish", "Fishing Rate (Should be a number from 0 to 1):", value = 0, min = 0, max = 100),
                           numericInput("distance", "Distance to Nearest Reef (km):", value = 0, min = 0, max = 100),
-                          actionButton("predict", "Predict")
+                          actionButton("predict", "Predict"),
+                          tags$p("The plot on the right allows users to observe in three-dimensional space how the three variables - Sea Surface Temperature Anomaly, Fishing Rate, and Distance to the Nearest Reef - impact the occurrence of coral bleaching. In addition, users can input new data points and make predictions on them to better understand the behavior of the model.")
                         )),
                         column(9,
                                fluidRow(
@@ -68,31 +66,14 @@ ui <- fluidPage(
                                )
                         )
                       ),
+                      tags$hr(),
                       fluidRow(
-                        column(4, wellPanel(
-                          numericInput("yellowfin_tuna_rate_norm",actionButton("yellowfin_tuna","Yellowfin Tuna Rate (Should be a Number from 0 to 1):"), value = NULL),
-                          numericInput("mackerel_rate_norm", actionButton("mackerel","Mackerel Rate (Should be a Number from 0 to 1): "), value = NULL),
-                          numericInput("skipjack_tuna_rate_norm", actionButton("skipjack_Tuna","Skipjack Tuna Rate (Should be a Number from 0 to 1):"), value = NULL),
-                          actionButton("predict_fish", "Predict")
-                        )),
-                        column(9,
-                               fluidRow(
-                                 column(12,
-                                        verbatimTextOutput("Fish_prediction_result"),
-                                        
-                                 )
-                               ),
-                               fluidRow(
-                                 column(12,
-                                        plotlyOutput("Fish_interactive_plot", height = "500px")
-                                 )
-                               )
-                        )
-                      ),
-                      fluidRow(
-                        column(3,
+                        column(3,wellPanel(
                                sliderInput("increase_rate", "Increase rate:", min = 1, max = 1.3, value = 1.1, step = 0.05),
-                               actionButton("predict_map", "Predict")
+                               actionButton("predict_map", "Predict"),
+                               tags$p("The figure on the right represents the bleaching of corals in Indonesia. Users can adjust the overall catch rate to see the change in bleaching.")
+                            )
+                              
                         ),
                         column(9,
                                leafletOutput("predicted_map", height = "500px")
@@ -104,32 +85,26 @@ ui <- fluidPage(
              
              tabPanel(
                "Graph",
-               tabsetPanel(
-                 tabPanel(
-                   "Importance of Fish Species and Environment",
-                   fluidRow(
-                     column(6, plotOutput("shap_plot2")),
-                     column(6, plotOutput("shap_plot"))
-                   )
-                 ),
-                 tabPanel(
-                   "Overall Relationship between Fish and Bleaching / Bleaching Over the Years",
-                   fluidRow(
-                     column(6, wellPanel(
-                       sliderInput("num_years", "Select number of years to predict:", min = 1, max = 10, value = 5)
-                     )),
-                     column(6, plotOutput("bleaching_by_year"))
-                   ),
-                   fluidRow(
-                     column(4, wellPanel(
-                       selectInput("selected_fish", "Select a fish:", 
-                                   choices = c("Yellowfin Tuna" = "yellowfin_tuna_rate_norm",
-                                               "Mackerel" = "mackerel_rate_norm",
-                                               "Skipjack Tuna" = "skipjack_tuna_rate_norm"))
-                     )),
-                     column(8, plotOutput("bleaching_by_fish"))
-                   )
-                 )
+               
+               fluidRow(
+                 column(4, wellPanel(
+                   sliderInput("num_years", "Select number of years to predict:", min = 1, max = 10, value = 5),
+                   tags$p("This image shows the bleaching of the coral in previous years and the possible bleaching that could occur in the following years based on the bleaching values of previous years without considering other factors.")
+                 )),
+                 column(8, plotOutput("bleaching_by_year")),
+                 
+               ),
+               tags$hr(),
+               fluidRow(
+                 column(4, wellPanel(
+                   selectInput("selected_fish", "Select a fish:", 
+                               choices = c("Yellowfin Tuna" = "yellowfin_tuna_rate_norm",
+                                           "Mackerel" = "mackerel_rate_norm",
+                                           "Skipjack Tuna" = "skipjack_tuna_rate_norm")),
+                   tags$p("This graph shows a simple linear relationship between fishing rates and coral bleaching for some representative fish species in Indonesia")
+                 )),
+                 column(8, plotOutput("bleaching_by_fish"))
+                 
                )
              )
              
@@ -164,58 +139,62 @@ server <- function(input, output, session) {
   model_prediction <- reactive({
     req(input$predict)
     
+    
     input_data <- data.frame(
       clim_sst = input$ssta,
       rate_norm = input$fish,
       distance_to_nearest_reef = input$distance
     )
     pred <- predict(rf_model, input_data)
-    
-    pred
   })
   
-  new_points <- reactiveVal(data.frame())
+  new_points <- reactiveValues(df = data.frame())
   
   observeEvent(input$predict, {
-    new_point <- data.frame(
-      clim_sst = input$ssta,
-      rate_norm = input$fish,
-      distance_to_nearest_reef = input$distance,
-      bleaching_occurred = model_prediction(),
-      stringsAsFactors = FALSE
-    )
-    
-    # Colour for New point
-    new_point$point_color <- ifelse(new_point$bleaching_occurred == 2, "blue","red" )
-    new_point$point_label <- ifelse(new_point$bleaching_occurred == 2, "Bleaching occurred", "No bleaching")
-    
-    new_points(rbind(new_points(), new_point))
-    
-    
-    
-    output$interactive_plot <- renderPlotly({
-      p <- plot_ly() %>%
-        add_trace(data = training_set %>% filter(bleaching_occurred == 0), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = "green", type = "scatter3d", mode = "markers", name = "No Bleaching", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1))) %>%
-        add_trace(data = training_set %>% filter(bleaching_occurred == 1), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = "yellow", type = "scatter3d", mode = "markers", name = "Bleaching Occurred", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1))) 
+    if (is.na(input$ssta) || is.na(input$fish) || is.na(input$distance)) {
+      showModal(modalDialog(
+        title = "Error",
+        "Please fill in all the fields!",
+        easyClose = TRUE,
+        footer = NULL
+      ))
+    } else {
+      new_point <- data.frame(
+        clim_sst = input$ssta,
+        rate_norm = input$fish,
+        distance_to_nearest_reef = input$distance,
+        bleaching_occurred = model_prediction(),
+        stringsAsFactors = FALSE
+      )
       
-      if (nrow(new_points()) > 0) {
-        p <- p %>%
-          add_trace(data = new_points(), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = ~point_color, text = ~point_label, type = "scatter3d", mode = "markers+text", name = "New Points", marker = list(symbol = "circle", size = 8, line = list(color = "black", width = 2)))
-      }
+      new_point$point_color <- ifelse(new_point$bleaching_occurred == 2, "blue","red" )
+      new_point$point_label <- ifelse(new_point$bleaching_occurred == 2, "", "")
       
-      p <- p %>% layout(legend = list(traceorder = "normal", itemsizing = "constant"))
-      
-      p
-    })
-    
+      new_points$df <- rbind(new_points$df, new_point)
+    }
   })
+  
+  output$interactive_plot <- renderPlotly({
+    p <- plot_ly() %>%
+      add_trace(data = training_set %>% filter(bleaching_occurred == 0), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = "green", type = "scatter3d", mode = "markers", name = "No Bleaching", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1))) %>%
+      add_trace(data = training_set %>% filter(bleaching_occurred == 1), x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = "yellow", type = "scatter3d", mode = "markers", name = "Bleaching Occurred", marker = list(symbol = "circle", size = 6, line = list(color = "black", width = 1)))
+    
+    if (nrow(new_points$df) > 0) {
+      p <- p %>%
+        add_trace(data = new_points$df, x = ~clim_sst, y = ~rate_norm, z = ~distance_to_nearest_reef, color = ~point_color, text = ~point_label, type = "scatter3d", mode = "markers+text", name = "New Points", marker = list(symbol = "circle", size = 8, line = list(color = "black", width = 2)))
+    }
+    
+    p <- p %>% layout(legend = list(traceorder = "normal", itemsizing = "constant"))
+    
+    p
+  })
+  
   
   
   output$prediction_result <- renderPrint({
     req(input$predict)
     pred_result <- model_prediction()
     pred_numeric <- as.numeric(levels(pred_result))[pred_result] # Convert factor to numeric
-    print(pred_numeric)
     
     if (pred_numeric == 1) { # Update the condition to check the numeric value
       cat("Predicted: Reef health declined\n")
@@ -271,21 +250,31 @@ server <- function(input, output, session) {
   })
   
   # Catch vs. Bleaching plot
-  output$catch_bleaching <- renderPlot({
-    req(clicked_reef())
-    ggplot(clicked_reef(), aes(x = sum_effort, y = average_bleaching)) +
-      geom_point() + 
-      geom_line(aes(group = 1), linetype = "dashed", color = "blue") +
-      labs(x = "Fishing Effort", y = "Average Bleaching")
-  })
-  
-  # Year vs. Bleaching plot
   output$year_bleaching <- renderPlot({
-    req(clicked_reef())
+    if (is.null(clicked_reef())) {
+      return(ggplot() + 
+               labs(title = "No Reef Selected") +
+               theme_void())
+    }
+    
     ggplot(clicked_reef(), aes(x = year, y = average_bleaching)) +
       geom_point() +
       geom_line(aes(group = 1), linetype = "dashed", color = "blue") +
       labs(x = "Year", y = "Average Bleaching")
+  })
+  
+  # Year vs. Bleaching plot
+  output$catch_bleaching <- renderPlot({
+    if (is.null(clicked_reef())) {
+      return(ggplot() + 
+               labs(x = "Fishing Effort", y = "Average Bleaching", title = "No Reef Selected") +
+               theme_void())
+    }
+    
+    ggplot(clicked_reef(), aes(x = sum_effort, y = average_bleaching)) +
+      geom_point() + 
+      geom_line(aes(group = 1), linetype = "dashed", color = "blue") +
+      labs(x = "Fishing Effort", y = "Average Bleaching")
   })
   
   # Bleaching by Temperature
@@ -312,15 +301,7 @@ server <- function(input, output, session) {
       group_by(year) %>%
       dplyr::summarise(mean_bleaching = mean(average_bleaching, na.rm = TRUE))
     
-    
-    
-    # Fit ARIMA model
-    # Fit ARIMA model with custom parameters
-    # Perform first-order differencing
-    # Perform first-order differencing
     yearly_bleaching$mean_bleaching_diff <- c(NA, diff(yearly_bleaching$mean_bleaching))
-    
-    
     arima_model <- arima(yearly_bleaching$mean_bleaching_diff, order = c(1,1,0)) # Here you can change the order parameters (p,d,q) as per your requirement
     
     # Forecast the next n years
@@ -347,12 +328,6 @@ server <- function(input, output, session) {
 
   })
   
-  
-  output$shap_plot <- renderPlot({
-    
-    plot(rf_importance_fish)
-    
-  })
   
   output$shap_plot2 <- renderPlot({
     
@@ -403,56 +378,7 @@ server <- function(input, output, session) {
       )
   })
   
-  observeEvent(input$yellowfin_tuna, {
-    # Show a modal when the button is pressed
-    shinyalert("Yellowfin Tuna", "Scientific name: Thunnus albacares
 
-Family: Scombridae
-
-Other names: Yellow-finned albacore, Pacific long-tailed tuna, Allison’s tuna
-
-Description: Yellowfin tuna have torpedo-shaped bodies with dark metallic blue backs, yellow sides, and a silver belly. They have very long anal and dorsal fins that are bright yellow, as are their finlets.
-
-Size (length and weight): Up to 2.1 metres in length and 200 kg. Commonly found at 50‑90 cm in length and 100 kg.
-
-Life span: Up to about 7 years.
-
-", type = "success")
-  })
-  
-  observeEvent(input$skipjack_Tuna, {
-    # Show a modal when the button is pressed
-    shinyalert("Yellowfin Tuna", "Scientific name: Scomber australasicus
-
-Family: Scombridae
-
-Other names: Pacific mackerel, common mackerel, English mackerel, school mackerel, spotted chub mackerel, spotted mackerel, chub mackerel, Japanese mackerel, southern mackerel, slimy mackerel, slimies
-
-Description: Blue mackerel have a fusiform (‘spindle-like’) body covered in small scales. They have bluish to greenish backs and pale spotted bellies, with dark bars on the upper sides. Both the second dorsal fin and anal fin are followed by five to six finlets. The eyes have adipose (fatty tissue) eyelids that leave a vertical slit over the pupils.
-
-Size (length and weight): Up to 65 cm in length and 1.5 kg. Commonly found at 20‑35 cm in length and 0.2‑0.7 kg.
-
-Life span: Up to 7 years, but more commonly 1‑3 years.
-
-", type = "success")
-  })
-  
-  observeEvent(input$mackerel, {
-    # Show a modal when the button is pressed
-    shinyalert("markerel", "Scientific name: Scomber australasicus
-
-Family: Scombridae
-
-Other names: Pacific mackerel, common mackerel, English mackerel, school mackerel, spotted chub mackerel, spotted mackerel, chub mackerel, Japanese mackerel, southern mackerel, slimy mackerel, slimies
-
-Description: Blue mackerel have a fusiform (‘spindle-like’) body covered in small scales. They have bluish to greenish backs and pale spotted bellies, with dark bars on the upper sides. Both the second dorsal fin and anal fin are followed by five to six finlets. The eyes have adipose (fatty tissue) eyelids that leave a vertical slit over the pupils.
-
-Size (length and weight): Up to 65 cm in length and 1.5 kg. Commonly found at 20‑35 cm in length and 0.2‑0.7 kg.
-
-Life span: Up to 7 years, but more commonly 1‑3 years.
-
-", type = "success")
-  })
   
   output$predicted_map <- renderLeaflet({
     leaflet() %>% addTiles()
@@ -460,19 +386,16 @@ Life span: Up to 7 years, but more commonly 1‑3 years.
   
   
   observeEvent(input$predict_map, {
-    # 复制原始数据
     new_data <- regression_fish
     
-    # 增加鱼的数量
     new_data$yellowfin_tuna_rate_norm <- new_data$yellowfin_tuna_rate_norm * input$increase_rate
     new_data$mackerel_rate_norm <- new_data$mackerel_rate_norm * input$increase_rate
     new_data$skipjack_tuna_rate_norm <- new_data$skipjack_tuna_rate_norm * input$increase_rate
     
-    # 使用模型生成预测
     new_data$predicted_bleaching <- predict(rf_model_fish, newdata = new_data, type = "prob")[,2]
     mean_values <- mean(new_data$predicted_bleaching)
     print(mean_values)
-    # 更新地图
+
     leafletProxy("predicted_map", session) %>%
       clearMarkers() %>%
       addCircleMarkers(
