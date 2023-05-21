@@ -38,6 +38,9 @@ shinyalert
 rsconnect
 
 Because of the size of the dataset, there might be a quite long loading time (May cost 30s before it shows).
+
 Home Page: Interactive Map with clickable point to show bleaching.
+
 Model Page: Please Enter a number or you will get an alert (It will show error until you fill in a number, click the screen to close the alert).
+
 Graph page: shows general graph with bleaching
