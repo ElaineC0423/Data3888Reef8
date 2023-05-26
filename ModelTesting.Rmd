@@ -1,5 +1,5 @@
 ---
-title: "ResultTesting"
+title: "ModelResultTesting"
 output: html_document
 date: "2023-05-26"
 ---
@@ -7,6 +7,7 @@ date: "2023-05-26"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 # load data & packages
 ```{r}
 library(e1071)
@@ -61,6 +62,7 @@ cat("K-NN accuracy with CV:", mean(knn_accuracy_cv), "\n")
 cat("NN accuracy with CV:", mean(nn_accuracy_cv), "\n")
 ```
 
+# random forest model's learning curve
 ```{r}
 # Initialize a data frame to store the results
 results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
@@ -90,7 +92,7 @@ for (i in 1:10) {
                      data.frame(Model = "Random Forest", Resample = i, Accuracy = valid_accuracy, Set = "Validation"))
 }
 
-# Now, you can plot the learning curve
+# Plot the learning curve
 ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
   geom_line() +
   facet_wrap(~ Model) +
@@ -99,6 +101,7 @@ ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
   theme_minimal()
 ```
 
+# SVM model's learning curve
 ```{r}
 # Initialize a data frame to store the results
 results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
@@ -137,6 +140,7 @@ ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
   theme_minimal()
 ```
 
+# KNN model's learning curve
 ```{r}
 # Initialize a data frame to store the results
 results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
@@ -175,6 +179,7 @@ ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
   theme_minimal()
 ```
 
+# NN model's learning curve
 ```{r}
 # Initialize a data frame to store the results
 results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
@@ -212,4 +217,3 @@ ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
   scale_color_discrete(name = "Set") +
   theme_minimal()
 ```
-
