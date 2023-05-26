@@ -1,0 +1,133 @@
+---
+title: "ReefHealthPredictionModels"
+output: html_document
+date: "2023-05-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# load data & packages
+```{r}
+library(caret)
+set.seed(123)
+
+merged_effort <- read.csv("data/merged.csv")
+```
+
+# Split the data into a training and testing set
+```{r}
+split_indices <- createDataPartition(merged_effort$average_bleaching, p = 0.8, list = FALSE)
+training_set <- merged_effort[split_indices, ]
+testing_set <- merged_effort[-split_indices, ]
+```
+
+# investigating the relationship between selected variable and corla bleaching
+```{r}
+# Model 1: Temperature
+model_temp <- lm(average_bleaching ~ clim_sst, data = training_set)
+summary(model_temp)
+
+# Model 2: Fishing rate_norm
+model_rate_norm <- lm(average_bleaching ~ rate_norm, data = training_set)
+summary(model_rate_norm)
+
+# Model 3: Fishing distance
+model_distance <- lm(average_bleaching ~ distance_to_nearest_reef, data = training_set)
+summary(model_distance)
+```
+
+# multiple regression model: regression model include all selected variable
+```{r}
+model_all <- lm(average_bleaching ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set)
+summary(model_all)
+```
+
+# Evaluate model performance by checking the Mean squared error
+```{r}
+library(Metrics)
+# Evaluate model performance
+pred_temp <- predict(model_temp, testing_set)
+pred_rate_norm <- predict(model_rate_norm, testing_set)
+pred_distance <- predict(model_distance, testing_set)
+pred_all <- predict(model_all, testing_set)
+
+mse_temp <- mse(testing_set$average_bleaching, pred_temp)
+mse_rate_norm <- mse(testing_set$average_bleaching, pred_rate_norm)
+mse_distance <- mse(testing_set$average_bleaching, pred_distance)
+mse_all <- mse(testing_set$average_bleaching, pred_all)
+
+cat("MSE for Temperature model:", mse_temp, "\n")
+cat("MSE for Fishing rate_norm model:", mse_rate_norm, "\n")
+cat("MSE for Fishing distance model:", mse_distance, "\n")
+cat("MSE for Combined model:", mse_all, "\n")
+
+library(ggplot2)
+# Create a data frame for plotting
+mse_data <- data.frame(
+  Model = factor(c("Temperature", "Fishing rate_norm", "Fishing distance", "Combined")),
+  MSE = c(mse_temp, mse_rate_norm, mse_distance, mse_all)
+)
+
+# Create the bar plot
+ggplot(mse_data, aes(x = Model, y = MSE, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.7, show.legend = FALSE) +
+  labs(title = "MSE of each model", x = "Model", y = "Mean Squared Error") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Coral health prediction using random forest model (coral bleaching)
+```{r}
+# Install and load the randomForest package
+library(randomForest)
+
+# Create binary target variable
+training_set$bleaching_occurred <- as.factor(ifelse(training_set$average_bleaching > 0, 1, 0))
+testing_set$bleaching_occurred <- as.factor(ifelse(testing_set$average_bleaching > 0, 1, 0))
+
+# Random Forest Model
+rf_model <- randomForest(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef,
+                         data = training_set)
+rf_pred <- predict(rf_model, testing_set)
+```
+
+# Coral health prediction using Logistic Regression Model
+```{r}
+logit_model <- glm(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, 
+                   data = training_set, family = binomial)
+logit_pred <- predict(logit_model, testing_set, type = "response")
+logit_pred <- ifelse(logit_pred > 0.5, 1, 0)
+
+summary(logit_model)
+```
+
+# SVM model
+```{r}
+library(e1071)
+library(kernlab)
+
+svm_model_fit <- svm(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set)
+svm_predictions <- predict(svm_model_fit, newdata = testing_set)
+svm_accuracy <- mean(svm_predictions == testing_set$bleaching_occurred)
+```
+
+# K-NN model
+```{r}
+library(caret)
+library(nnet)
+
+knn_model_fit <- knn3(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set)
+knn_predictions <- predict(knn_model_fit, newdata = testing_set)
+knn_accuracy <- mean(knn_predictions == testing_set$bleaching_occurred)
+```
+
+# NN model
+```{r}
+library(class)
+
+nn_model_fit <- nnet(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set, linout = FALSE, trace = FALSE, size = 3)
+nn_predictions <- predict(nn_model_fit, newdata = testing_set, type = "class")
+nn_accuracy <- mean(nn_predictions == testing_set$bleaching_occurred)
+```

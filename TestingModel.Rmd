@@ -1,0 +1,215 @@
+---
+title: "ResultTesting"
+output: html_document
+date: "2023-05-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# load data & packages
+```{r}
+library(e1071)
+library(kernlab)
+library(caret)
+library(nnet)
+library(class)
+
+merged_effort <- read.csv("data/merged.csv")
+
+split_indices <- createDataPartition(merged_effort$average_bleaching, p = 0.8, list = FALSE)
+training_set <- merged_effort[split_indices, ]
+testing_set <- merged_effort[-split_indices, ]
+
+# Create binary target variable
+training_set$bleaching_occurred <- as.factor(ifelse(training_set$average_bleaching > 0, 1, 0))
+testing_set$bleaching_occurred <- as.factor(ifelse(testing_set$average_bleaching > 0, 1, 0))
+```
+
+# get accuracy of each model after 5 repeat
+```{r}
+library(plyr)
+library(caret)
+
+ctrl <- trainControl(method = "cv", number = 10, repeats = 5)
+
+rf_model_cv <- caret::train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, 
+                     data = training_set, method = "rf", trControl = ctrl)
+rf_accuracy_cv <- rf_model_cv$results$Accuracy
+
+svm_model_cv <- caret::train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, 
+                      data = training_set, method = "svmRadial", trControl = ctrl)
+svm_accuracy_cv <- svm_model_cv$results$Accuracy
+
+knn_model_cv <- caret::train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, 
+                      data = training_set, method = "knn", trControl = ctrl)
+knn_accuracy_cv <- knn_model_cv$results$Accuracy
+
+# 3. NN
+nnetGrid <- expand.grid(decay = c(0, 0.001, 0.01, 0.1), size = c(1, 3, 5, 7, 9))
+
+nn_model_cv <- caret::train(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, 
+                     data = training_set, method = "nnet", linout = FALSE, trace = FALSE, 
+                     tuneGrid = nnetGrid, trControl = ctrl)
+nn_accuracy_cv <- nn_model_cv$results$Accuracy
+
+
+
+cat("RF accuracy with CV:", mean(rf_accuracy_cv), "\n")
+cat("SVM accuracy with CV:", mean(svm_accuracy_cv), "\n")
+cat("K-NN accuracy with CV:", mean(knn_accuracy_cv), "\n")
+cat("NN accuracy with CV:", mean(nn_accuracy_cv), "\n")
+```
+
+```{r}
+# Initialize a data frame to store the results
+results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
+
+# Perform the cross-validation manually
+folds <- createFolds(training_set$bleaching_occurred, k = 10)
+for (i in 1:10) {
+    # Create the training and validation sets for this fold
+    train_indices <- folds[[i]]
+    train_fold <- training_set[train_indices, ]
+    valid_fold <- training_set[-train_indices, ]
+    
+    # Train the model on the training fold
+    rf_model <- randomForest(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = train_fold)
+    
+    # Evaluate the model on the training and validation folds
+    train_predictions <- predict(rf_model, newdata = train_fold)
+    valid_predictions <- predict(rf_model, newdata = valid_fold)
+    
+    # Calculate the accuracy
+    train_accuracy <- sum(train_predictions == train_fold$bleaching_occurred) / nrow(train_fold)
+    valid_accuracy <- sum(valid_predictions == valid_fold$bleaching_occurred) / nrow(valid_fold)
+    
+    # Add the results to the data frame
+    results <- rbind(results, 
+                     data.frame(Model = "Random Forest", Resample = i, Accuracy = train_accuracy, Set = "Training"),
+                     data.frame(Model = "Random Forest", Resample = i, Accuracy = valid_accuracy, Set = "Validation"))
+}
+
+# Now, you can plot the learning curve
+ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
+  geom_line() +
+  facet_wrap(~ Model) +
+  labs(title = "Learning Curve", x = "Resample", y = "Accuracy") +
+  scale_color_discrete(name = "Set") +
+  theme_minimal()
+```
+
+```{r}
+# Initialize a data frame to store the results
+results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
+
+# Perform the cross-validation manually
+folds <- createFolds(training_set$bleaching_occurred, k = 10)
+for (i in 1:10) {
+    # Create the training and validation sets for this fold
+    train_indices <- folds[[i]]
+    train_fold <- training_set[train_indices, ]
+    valid_fold <- training_set[-train_indices, ]
+    
+    # Train the model on the training fold
+    svm_model <- svm(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = train_fold)
+    
+    # Evaluate the model on the training and validation folds
+    train_predictions <- predict(svm_model, newdata = train_fold)
+    valid_predictions <- predict(svm_model, newdata = valid_fold)
+    
+    # Calculate the accuracy
+    train_accuracy <- sum(train_predictions == train_fold$bleaching_occurred) / nrow(train_fold)
+    valid_accuracy <- sum(valid_predictions == valid_fold$bleaching_occurred) / nrow(valid_fold)
+    
+    # Add the results to the data frame
+    results <- rbind(results, 
+                     data.frame(Model = "SVM", Resample = i, Accuracy = train_accuracy, Set = "Training"),
+                     data.frame(Model = "SVM", Resample = i, Accuracy = valid_accuracy, Set = "Validation"))
+}
+
+# Now, you can plot the learning curve
+ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
+  geom_line() +
+  facet_wrap(~ Model) +
+  labs(title = "Learning Curve", x = "Resample", y = "Accuracy") +
+  scale_color_discrete(name = "Set") +
+  theme_minimal()
+```
+
+```{r}
+# Initialize a data frame to store the results
+results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
+
+# Perform the cross-validation manually
+folds <- createFolds(training_set$bleaching_occurred, k = 10)
+for (i in 1:10) {
+    # Create the training and validation sets for this fold
+    train_indices <- folds[[i]]
+    train_fold <- training_set[train_indices, ]
+    valid_fold <- training_set[-train_indices, ]
+    
+    # Train the model on the training fold
+    knn_model <- knn3(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = train_fold)
+    
+    # Evaluate the model on the training and validation folds
+    train_predictions <- predict(knn_model, newdata = train_fold)
+    valid_predictions <- predict(knn_model, newdata = valid_fold)
+    
+    # Calculate the accuracy
+    train_accuracy <- sum(train_predictions == train_fold$bleaching_occurred) / nrow(train_fold)
+    valid_accuracy <- sum(valid_predictions == valid_fold$bleaching_occurred) / nrow(valid_fold)
+    
+    # Add the results to the data frame
+    results <- rbind(results, 
+                     data.frame(Model = "KNN", Resample = i, Accuracy = train_accuracy, Set = "Training"),
+                     data.frame(Model = "KNN", Resample = i, Accuracy = valid_accuracy, Set = "Validation"))
+}
+
+# Now, you can plot the learning curve
+ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
+  geom_line() +
+  facet_wrap(~ Model) +
+  labs(title = "Learning Curve", x = "Resample", y = "Accuracy") +
+  scale_color_discrete(name = "Set") +
+  theme_minimal()
+```
+
+```{r}
+# Initialize a data frame to store the results
+results <- data.frame(Model = character(), Resample = numeric(), Accuracy = numeric(), Set = character())
+
+# Perform the cross-validation manually
+folds <- createFolds(training_set$bleaching_occurred, k = 10)
+for (i in 1:10) {
+    # Create the training and validation sets for this fold
+    train_indices <- folds[[i]]
+    train_fold <- training_set[train_indices, ]
+    valid_fold <- training_set[-train_indices, ]
+    
+    # Train the model on the training fold
+    nn_model_fit <- nnet(bleaching_occurred ~ clim_sst + rate_norm + distance_to_nearest_reef, data = training_set, linout = FALSE, trace = FALSE, size = 3)
+    
+    # Evaluate the model on the training and validation folds
+    train_predictions <- predict(nn_model_fit, newdata = train_fold)
+    valid_predictions <- predict(nn_model_fit, newdata = valid_fold)
+    
+    # Calculate the accuracy
+    train_accuracy <- sum(train_predictions == train_fold$bleaching_occurred) / nrow(train_fold)
+    valid_accuracy <- sum(valid_predictions == valid_fold$bleaching_occurred) / nrow(valid_fold)
+    
+    # Add the results to the data frame
+    results <- rbind(results, 
+                     data.frame(Model = "NN", Resample = i, Accuracy = train_accuracy, Set = "Training"),
+                     data.frame(Model = "NN", Resample = i, Accuracy = valid_accuracy, Set = "Validation"))
+}
+
+# Now, you can plot the learning curve
+ggplot(results, aes(x = Resample, y = Accuracy, color = Set)) +
+  geom_line() +
+  facet_wrap(~ Model) +
+  labs(title = "Learning Curve", x = "Resample", y = "Accuracy") +
+  scale_color_discrete(name = "Set") +
+  theme_minimal()
+```
+

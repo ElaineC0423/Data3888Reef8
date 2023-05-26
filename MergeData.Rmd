@@ -1,0 +1,226 @@
+---
+title: "Merge data"
+output: html_document
+date: "2023-05-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data & packages
+
+```{r Loading in packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(sf)
+```
+# merge data for developing model
+## read in fish data
+```{r Loading in the data}
+catch_95 <- read.csv("Data/CatchInd1995_1999.csv") %>% clean_names()
+catch_00 <- read.csv("Data/CatchInd2000_2004.csv") %>% clean_names()
+catch_05 <- read.csv("Data/CatchInd2005_2009.csv") %>% clean_names()
+catch_10 <- read.csv("Data/CatchInd2010_2014.csv") %>% clean_names()
+
+cell <- read_xlsx("Data/Codes.xlsx", sheet = "Cell") %>% clean_names()
+gear <- read_xlsx("Data/Codes.xlsx", sheet = "Gear") %>% clean_names()
+taxa <- read_xlsx("Data/Codes.xlsx", sheet = "Taxa") %>% clean_names()
+country <- read_xlsx("Data/Codes.xlsx", sheet = "Country") %>% clean_names()
+
+```
+
+## read in index data
+```{r}
+index <- read.csv("Data/IndexInd.csv") %>% clean_names()
+```
+
+## filtering Indonesian fish records, and combining across the different year ranges.
+```{r Filtering for Indonesian records}
+indo_code <- country %>% filter(fao_name == "Indonesia") %>% pull(country)
+tuna_code <- taxa %>% filter(common_name == "Yellowfin tuna") %>% pull(taxon_key) # sample to select Yellowfin tuna in indonesia
+indo_tuna_ids <- index %>% filter(c_number == indo_code, taxonkey == tuna_code) %>% pull(id)
+
+catch_95_filtered <- catch_95 %>% filter(id %in% indo_tuna_ids)
+catch_00_filtered <- catch_00 %>% filter(id %in% indo_tuna_ids)
+catch_05_filtered <- catch_05 %>% filter(id %in% indo_tuna_ids)
+catch_10_filtered <- catch_10 %>% filter(id %in% indo_tuna_ids)
+
+catch_all <- rbind(catch_95_filtered, catch_00_filtered, catch_05_filtered, catch_10_filtered)
+```
+
+## Merge fish data from different year
+1. Merge in the location, year, and gear data.
+2. Filter down to the Indonesian region (we were only considering Indonesian vessels before).
+3. Aggregate results across fishing gears.
+```{r Merging the data}
+catch_cleaned <- catch_all %>% 
+  left_join(cell, by = "cell") %>% 
+  left_join(index[, c("id", "i_year", "gear")], by = "id") %>% 
+  filter(lat_centre >= -10, lat_centre <= 13, lon_centre >= 93, lon_centre <= 134) %>% 
+  group_by(lat_centre, lon_centre, i_year) %>% 
+  summarise(sum_reported = sum(reported),
+            area = mean(ocean_areasqkm)) %>% 
+  ungroup() %>% 
+  arrange(lat_centre, lon_centre, i_year) %>% 
+  rename(latitude = lat_centre, longitude = lon_centre, year = i_year) %>% 
+  mutate(rate_reported = round(1000*sum_reported/area, 4)) %>% # Landings per 1000 square kilometres
+  select(-sum_reported, -area)
+```
+
+## load in the reef data from the labs and filter it to have the same range as the fishing data.
+```{r Loading in the reef data}
+reef <- read.csv("Data/Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv") %>% 
+  clean_names() %>% 
+  filter(latitude_degrees >= min(catch_cleaned$latitude), latitude_degrees <= max(catch_cleaned$latitude), 
+         longitude_degrees >= min(catch_cleaned$longitude), longitude_degrees <= max(catch_cleaned$longitude),
+         year >= min(catch_cleaned$year), year <= max(catch_cleaned$year)) %>% 
+  select(reef_id, latitude_degrees, longitude_degrees, year, average_bleaching, clim_sst) %>% 
+  rename(latitude = latitude_degrees, longitude = longitude_degrees)
+```
+
+## Perform a nearest-neighbour join between the reef and catch datasets.
+```{r Nearest-neighbour join}
+
+merged <- data.frame()
+
+for (curr_year in unique(reef$year)) {
+  catch_sf <- catch_cleaned %>% 
+    filter(year == curr_year) %>% 
+    as.data.frame() %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+  
+  reef_sf <- reef %>% 
+    filter(year == curr_year) %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+
+  # Compute distances between each point in catch_sf and reef_sf
+  distances <- st_distance(catch_sf, reef_sf)
+
+  # Get the minimum distance for each catch point
+  min_distances <- apply(distances, 1, min)
+
+  # Join the datasets based on nearest features
+  merged_year <- st_join(catch_sf, reef_sf, join = st_nearest_feature) %>% 
+    as.data.frame() %>% 
+    mutate(latitude = st_coordinates(.$geometry)[, 2], longitude = st_coordinates(.$geometry)[, 1]) %>% 
+    select(-year.x, -year.y, -geometry) %>% 
+    mutate(year = curr_year)
+
+  # Add the minimum distance as a new column to the merged_year dataframe
+  merged_year$distance_to_nearest_reef <- min_distances
+
+  rownames(merged_year) <- NULL
+  merged <- rbind(merged, merged_year)
+}
+```
+
+## Load in and merge the SAU fishing effort data, before normalising the catch data by fishing effort.
+```{r Fishing effort data}
+effort <- read.csv("Data/SAU Effort FishingEntity 83 v50-1.csv") %>% clean_names() %>% 
+  filter(fishing_sector == "Industrial") %>% 
+  group_by(year) %>% 
+  summarise(sum_effort = sum(effort)) %>% 
+  mutate(sum_effort = sum_effort/1e+06)
+
+merged_effort <- merged %>% 
+  left_join(effort, by = "year") %>% 
+  filter(!is.na(sum_effort)) %>% 
+  mutate(rate_norm = rate_reported/sum_effort) %>% 
+  select(-rate_reported)
+
+write.csv(merged_effort, file = "merged.csv")
+```
+
+# Merge data for iterative map
+```{r}
+merged <- read.csv("merged.csv")
+reef_data <- read.csv("Data/Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv") %>%
+  clean_names() %>%
+  select(reef_id, latitude_degrees, longitude_degrees)
+
+
+merged_with_reef_coords <- left_join(merged, reef_data, by = "reef_id")
+
+
+unique_reefs <- merged_with_reef_coords %>%
+  distinct(reef_id, latitude_degrees, longitude_degrees)
+
+
+filtered_merged_with_reef_coords <- merged_with_reef_coords %>%
+  group_by(reef_id, year) %>%
+  slice_min(distance_to_nearest_reef, n = 1) %>%
+  ungroup()
+
+reef_merged <- data.frame()
+
+for (curr_year in unique(reef$year)) {
+  catch_sf <- catch_cleaned %>% 
+    filter(year == curr_year) %>% 
+    as.data.frame() %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+  
+  reef_sf <- reef %>% 
+    filter(year == curr_year) %>% 
+    st_as_sf(coords = c("longitude", "latitude"))
+
+  # Compute distances between each point in catch_sf and reef_sf
+  distances <- st_distance(reef_sf, catch_sf)
+
+  # Get the minimum distance for each reef point
+  min_distances <- apply(distances, 1, min)
+
+  # Join the datasets based on nearest features
+  reef_merged_year <- st_join(reef_sf, catch_sf, join = st_nearest_feature) %>% 
+    as.data.frame() %>% 
+    mutate(latitude = st_coordinates(.$geometry)[, 2], longitude = st_coordinates(.$geometry)[, 1]) %>% 
+    select(-year.x, -year.y, -geometry) %>% 
+    mutate(year = curr_year)
+
+  # Add the minimum distance as a new column to the reef_merged_year dataframe
+  reef_merged_year$distance_to_nearest_catch <- min_distances
+
+  rownames(reef_merged_year) <- NULL
+  reef_merged <- rbind(reef_merged, reef_merged_year)
+}
+
+merged_effort <- reef_merged %>% 
+  left_join(effort, by = "year") %>% 
+  filter(!is.na(sum_effort)) %>% 
+  mutate(rate_norm = rate_reported/sum_effort) %>% 
+  select(-rate_reported)
+
+write.csv(merged_effort, file = "reef_merged.csv")
+```
+
+# Merge data for important fish in indonesia
+```{r}
+## find all fish in Ind
+indo_fish_ids <- index %>% filter(c_number == indo_code) %>% pull(taxonkey)
+
+## select fish by taxonkey
+fish_select_by_taxonkey <- taxa %>% filter(taxon_key %in% indo_fish_ids)
+
+Fish <- read.csv("Indonesia_fisheries.csv") # combine code 200 & 203; repeat code from line 40 - 133 to get all fish in Indonesia
+Yellowfin_tuna <- Fish %>% filter(fish_type == "Yellowfin_tuna")
+Scombroids <- Fish %>% filter(fish_type == "Scombroids")
+Skipjack_Tuna <- Fish %>% filter(fish_type == "Skipjack_tuna")
+
+final_selection <- rbind(Yellowfin_tuna, Scombroids, Skipjack_Tuna)
+write.csv(final_selection, file = "three_selected_Fish.csv")
+```
+
+# Perform some exploratory data analysis.
+```{r EDA}
+merged_effort <- read.csv("merged.csv")
+
+merged_effort %>% 
+ggplot(aes(x = average_bleaching, y = rate_norm)) +
+  geom_point()
+
+merged_effort %>% 
+  mutate(bleached = ifelse(average_bleaching > 0, "Bleached", "Not bleached")) %>% 
+  ggplot(aes(x = bleached, y = log(rate_norm))) +
+  geom_boxplot()
+```

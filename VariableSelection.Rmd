@@ -1,0 +1,26 @@
+---
+title: "PCA"
+output: html_document
+date: "2023-05-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# investigating the relationship between selected variable and corla bleaching
+```{r}
+merged_effort <- read.csv("merged.csv")
+
+# Model 1: Temperature
+model_temp <- lm(average_bleaching ~ clim_sst, data = merged_effort)
+summary(model_temp)
+
+# Model 2: Fishing rate_norm
+model_rate_norm <- lm(average_bleaching ~ rate_norm, data = merged_effort)
+summary(model_rate_norm)
+
+# Model 3: Fishing distance
+model_distance <- lm(average_bleaching ~ distance_to_nearest_reef, data = merged_effort)
+summary(model_distance)
+```
