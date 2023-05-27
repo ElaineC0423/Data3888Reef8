@@ -1,5 +1,5 @@
 # Data3888Reef8
-FinalApp_beta contains our Shiny App and used data
+**FinalApp_beta** contains our Shiny App and used data
 > *To use the app, due to of the size of the dataset, there might be a quite long loading time (May cost 30s before it shows).*
 
 **MergeData.Rmd:** Contains code for data cleaning and merging
