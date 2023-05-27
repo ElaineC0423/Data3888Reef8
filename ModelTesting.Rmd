@@ -16,7 +16,7 @@ library(caret)
 library(nnet)
 library(class)
 
-merged_effort <- read.csv("data/merged.csv")
+merged_effort <- read.csv("FinalApp_beta/merged.csv")
 
 split_indices <- createDataPartition(merged_effort$average_bleaching, p = 0.8, list = FALSE)
 training_set <- merged_effort[split_indices, ]

@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(caret)
 set.seed(123)
 
-merged_effort <- read.csv("data/merged.csv")
+merged_effort <- read.csv("FinalApp_beta/merged.csv")
 ```
 
 # Split the data into a training and testing set
