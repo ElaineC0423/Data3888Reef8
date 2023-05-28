@@ -17,3 +17,5 @@ app.R: the Reef Health prediction App
 **PredictionModels.Rmd:** Contains code for using different models to predict reef health
 
 **ModelTesting.Rmd:** Contains code for comparing the performance of each model
+
+**LLM-Sample-Code-For-Github.ipynb:** Sample code for ReefGpt
