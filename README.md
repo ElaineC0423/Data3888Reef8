@@ -1,6 +1,10 @@
 # Data3888Reef8
-**FinalApp_beta** contains our Shiny App and used data
+**FinalApp_beta:** contains Shiny App and used data
+app.R: the Reef Health prediction App 
 > *To use the app, due to of the size of the dataset, there might be a quite long loading time (May cost 30s before it shows).*
+- Home Page: Red point in the interactive map shows reef which has more than 3 years record. Double click the point to check fishing effort information
+- Model Prediction Page: Reef health prediction model & interactive map showing the change in bleaching while adjusting fish catch rate.
+- Graph Page: Contains graph shows predicted Reef bleaching rate in the future and linear relationship between selected fish & bleaching.
 
 **MergeData.Rmd:** Contains code for data cleaning and merging
 > Due to the original datasets excess the size limit of GitHub, we cannot upload them. Raw data Could be found in:

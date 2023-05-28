@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # investigating the relationship between selected variable and corla bleaching
 ```{r}
-merged_effort <- read.csv("FinalApp_betamerged.csv")
+merged_effort <- read.csv("FinalApp_beta/merged.csv")
 
 # Model 1: Temperature
 model_temp <- lm(average_bleaching ~ clim_sst, data = merged_effort)
